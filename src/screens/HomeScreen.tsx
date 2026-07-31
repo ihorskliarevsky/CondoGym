@@ -1,9 +1,10 @@
-import { WORKOUTS } from '../data/workouts'
 import type { Workout } from '../types'
 
 interface Props {
+  library: Workout[]
   onSelect: (id: string) => void
   onHistory: () => void
+  onManage: () => void
 }
 
 function WorkoutCard({ workout, onClick }: { workout: Workout; onClick: () => void }) {
@@ -21,9 +22,9 @@ function WorkoutCard({ workout, onClick }: { workout: Workout; onClick: () => vo
   )
 }
 
-export function HomeScreen({ onSelect, onHistory }: Props) {
-  const main = WORKOUTS.filter((w) => !w.lowBack)
-  const lowBack = WORKOUTS.filter((w) => w.lowBack)
+export function HomeScreen({ library, onSelect, onHistory, onManage }: Props) {
+  const main = library.filter((w) => !w.lowBack)
+  const lowBack = library.filter((w) => w.lowBack)
 
   return (
     <div className="app-shell">
@@ -38,17 +39,26 @@ export function HomeScreen({ onSelect, onHistory }: Props) {
             <WorkoutCard key={w.id} workout={w} onClick={() => onSelect(w.id)} />
           ))}
 
-          <div className="section-divider">
-            <span>Low-back friendly (temporary)</span>
-            <span className="line" />
-          </div>
+          {lowBack.length > 0 && (
+            <div className="section-divider">
+              <span>Low-back friendly (temporary)</span>
+              <span className="line" />
+            </div>
+          )}
 
           {lowBack.map((w) => (
             <WorkoutCard key={w.id} workout={w} onClick={() => onSelect(w.id)} />
           ))}
+
+          {library.length === 0 && (
+            <p className="history-empty">No workouts yet. Add one from Manage below.</p>
+          )}
         </div>
 
         <div className="home-footer">
+          <button type="button" className="history-link" onClick={onManage}>
+            Manage
+          </button>
           <button type="button" className="history-link" onClick={onHistory}>
             View history &#8594;
           </button>
