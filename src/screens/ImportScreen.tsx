@@ -159,8 +159,8 @@ export function ImportScreen({ initialText, editingName, onCancel, onSave }: Pro
               gives a single "mark as done".
             </li>
             <li>
-              Anything left over becomes the form cue. <code>ua: …</code> adds a Ukrainian note,{' '}
-              <code>youtube: …</code> or <code>gif: …</code> adds the demo.
+              Paste a YouTube link on its own line — or anywhere in the block — and it becomes the
+              demo. <code>ua: …</code> adds a Ukrainian note.
             </li>
             <li>
               A line reading <code>low-back</code> files it under the low-back section.

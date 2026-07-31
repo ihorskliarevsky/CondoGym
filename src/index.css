@@ -396,13 +396,77 @@ input[type='number'] {
 .demo-collapsed .play-btn {
   width: 34px;
   height: 34px;
-  font-size: 12px;
 }
 
 .demo-expanded .play-btn {
   width: 56px;
   height: 56px;
-  font-size: 20px;
+}
+
+/* Drawn, not typed — the ▶ glyph renders distorted on iOS. */
+.play-icon {
+  width: 42%;
+  height: 42%;
+  fill: currentColor;
+  display: block;
+  /* Optical centring: a triangle's mass sits left of its bounding box. */
+  margin-left: 8%;
+}
+
+.demo-empty {
+  background: var(--surface2);
+}
+
+.demo-empty-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted2);
+  color: var(--muted2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.demo-empty-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 18px;
+  text-align: center;
+}
+
+.demo-empty-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.demo-empty-hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.demo-empty-hint code {
+  background: var(--surface3);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.demo-search {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(11, 12, 14, 0.6);
 }
 
 .demo-label {

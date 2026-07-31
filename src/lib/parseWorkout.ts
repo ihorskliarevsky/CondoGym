@@ -57,6 +57,18 @@ interface Spec {
   weight?: number
 }
 
+/**
+ * A YouTube link anywhere in a line — most pastes just drop the URL in rather
+ * than labelling it `youtube:`, so it has to be recognised on sight.
+ */
+const YOUTUBE_URL =
+  /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:[^\s&]*&)*v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})[^\s]*/i
+
+const GIF_URL = /https?:\/\/\S+\.gif\b|\/\S+\.gif\b/i
+
+/** A line left holding nothing but its key, e.g. "youtube:" after the URL was taken. */
+const EMPTY_FIELD = /^[a-zЀ-ӿ_-]+\s*:\s*$/i
+
 function parseMedia(value: string, kind: 'youtube' | 'gif'): ExerciseMedia | null {
   const trimmed = value.trim()
   if (!trimmed) return null
@@ -310,6 +322,7 @@ function looksLikeName(text: string): boolean {
     text.length <= 48 &&
     text.split(/\s+/).length <= 6 &&
     !/[.!?;]$/.test(text) &&
+    !/https?:\/\//i.test(text) &&
     !fieldValue(text, ['cue', 'note', 'notes', 'tip', 'ua', 'uk', 'youtube', 'video', 'gif'])
   )
 }
@@ -351,7 +364,10 @@ function chunkExercises(lines: Line[]): Chunk[] {
 
   for (const line of lines) {
     const isSpec = parseSpec(line.text) !== null
-    const isField = fieldValue(line.text, CONTINUATION_FIELDS) !== null
+    // A line carrying a link belongs to the exercise above it — on its own it
+    // reads like a short title, which would otherwise split the exercise in two.
+    const isMedia = YOUTUBE_URL.test(line.text) || GIF_URL.test(line.text)
+    const isField = fieldValue(line.text, CONTINUATION_FIELDS) !== null || isMedia
 
     // "Hip Flexor Stretch — 45s hold" is a name *and* a spec: once the current
     // exercise has its own spec, that shape means the next exercise has begun.
@@ -448,7 +464,23 @@ function chunkToExercise(chunk: Chunk, warnings: string[]): Exercise | null {
   let cueUk: string | undefined
   let media: ExerciseMedia | undefined
 
-  for (const line of [...rest, ...chunk.body]) {
+  for (const original of [...rest, ...chunk.body]) {
+    // Take any link out of the line first, labelled or not, so it becomes the
+    // demo rather than ending up as cue text.
+    let line = original
+    const video = YOUTUBE_URL.exec(line)
+    if (video) {
+      media ??= { kind: 'youtube', id: video[1] }
+      line = line.replace(YOUTUBE_URL, '').trim()
+    } else {
+      const gif = GIF_URL.exec(line)
+      if (gif) {
+        media ??= { kind: 'gif', src: gif[0] }
+        line = line.replace(GIF_URL, '').trim()
+      }
+    }
+    if (!line || EMPTY_FIELD.test(line)) continue
+
     const youtube = fieldValue(line, ['youtube', 'yt', 'video', 'link'])
     const gif = fieldValue(line, ['gif', 'image', 'img'])
     const uk = fieldValue(line, ['ua', 'uk', 'укр', 'ua-cue'])
@@ -624,23 +656,43 @@ function jsonExercise(value: unknown, warnings: string[]): Exercise | null {
   const name = str(field(value, ['name', 'exercise', 'title', 'movement']))
   if (!name) return null
 
-  const cue = str(field(value, ['cue', 'note', 'notes', 'instruction', 'instructions', 'description', 'form', 'tip'])) ?? ''
+  const cue = (
+    str(field(value, ['cue', 'note', 'notes', 'instruction', 'instructions', 'description', 'form', 'tip'])) ?? ''
+  )
+    .replace(YOUTUBE_URL, '')
+    .trim()
   const cueUk = str(field(value, ['cueUk', 'ua', 'uk', 'ukrainian']))
 
   const mediaField = field(value, ['media'])
   let media: ExerciseMedia | undefined
   if (isBag(mediaField)) {
     const kind = str(field(mediaField, ['kind', 'type']))
-    const src = str(field(mediaField, ['src', 'id', 'url']))
+    const src = str(field(mediaField, ['src', 'id', 'url', 'href']))
     if (src) media = parseMedia(src, kind === 'gif' ? 'gif' : 'youtube') ?? undefined
+  } else if (typeof mediaField === 'string') {
+    media = parseMedia(mediaField, /\.gif\b/i.test(mediaField) ? 'gif' : 'youtube') ?? undefined
   } else {
-    const youtube = str(field(value, ['youtube', 'youtubeId', 'video', 'videoId', 'videoUrl', 'url', 'link']))
-    const gif = str(field(value, ['gif', 'gifUrl', 'image', 'img']))
+    const youtube = str(
+      field(value, [
+        'youtube', 'youtubeId', 'youtubeUrl', 'youtubeLink', 'video', 'videoId', 'videoUrl',
+        'videoLink', 'demo', 'demoUrl', 'clip', 'url', 'link', 'href',
+      ]),
+    )
+    const gif = str(field(value, ['gif', 'gifUrl', 'image', 'img', 'imageUrl']))
     if (gif) media = parseMedia(gif, 'gif') ?? undefined
     else if (youtube) {
       media = parseMedia(youtube, 'youtube') ?? undefined
       if (!media) warnings.push(`${name}: couldn't read the video link "${youtube}".`)
     }
+  }
+
+  // Last resort: a link sitting inside one of the text fields.
+  if (!media) {
+    const haystack = Object.values(value)
+      .filter((v): v is string => typeof v === 'string')
+      .join(' ')
+    const found = YOUTUBE_URL.exec(haystack)
+    if (found) media = { kind: 'youtube', id: found[1] }
   }
 
   const rest = num(field(value, ['rest', 'restSeconds', 'restS', 'restTime']))

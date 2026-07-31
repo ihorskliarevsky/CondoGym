@@ -92,9 +92,12 @@ Volume specs are matched loosely, anywhere on the line:
 | `60s hold` / `60 second hold` | a timed hold with a countdown |
 | `40s cardio` / `cardio` | a single "mark as done" |
 
-Optional extra lines: `ua: …` for a Ukrainian note, `youtube: <id or link>` or
-`gif: /demos/x.gif` for the demo visual, `letter: E` to override the badge, and
-a bare `low-back` line to file it under the low-back section.
+A YouTube link is picked up wherever it appears — on its own line, labelled
+`youtube:`/`video:`, appended to the exercise line, or mid-sentence in a cue —
+in `watch?v=`, `youtu.be`, `shorts`, `embed`, mobile, and timestamped forms. A
+`.gif` URL or path works the same way. Other optional lines: `ua: …` for a
+Ukrainian note, `letter: E` to override the badge, and a bare `low-back` line to
+file it under the low-back section.
 
 **JSON is accepted too** — an object with `name` and `exercises`, a bare array
 of exercises, an array of whole workouts, or anything wrapping one
@@ -112,10 +115,16 @@ The parser and its inverse live in
 
 ## Demo visuals
 
-Exercises without `media` show the play-button placeholder. GIFs loop in the
-tile; a YouTube clip only loads its iframe once the tile is expanded, so
-swiping through a workout doesn't pull an embed per exercise. GIFs go in
-`public/demos/` and are referenced as `/demos/name.gif`.
+A YouTube demo shows its poster frame in the collapsed tile and starts playing
+on that one tap — the iframe is only created then, so swiping through a workout
+never pulls an embed per exercise. GIFs loop in the tile and expand on tap;
+local ones go in `public/demos/` and are referenced as `/demos/name.gif`.
+
+Exercises with no `media` say so plainly and offer a YouTube search for the
+movement, rather than showing a play button that can't play anything.
+
+The play triangle is an inline SVG on purpose: the `▶` character falls back to
+a different font on iOS and renders distorted.
 
 ## Backup
 
