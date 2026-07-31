@@ -11,10 +11,14 @@ import type { Exercise, ExerciseMedia, Workout } from '../types'
  */
 
 export interface ParseResult {
-  workout: Workout | null
+  /** Usually one, but a paste can carry a whole set of workouts. */
+  workouts: Workout[]
   errors: string[]
   warnings: string[]
 }
+
+/** Keeps generated ids distinct when several workouts are built in one tick. */
+let idCounter = 0
 
 /* ---------------- shared helpers ---------------- */
 
@@ -87,7 +91,8 @@ function buildExercise(
 /** Shared tail of both parsers: unique ids, then the finished workout. */
 function assemble(header: Header, exercises: Exercise[], warnings: string[]): ParseResult {
   if (exercises.length === 0) {
-    return { workout: null, errors: ["Couldn't find any exercises in that."], warnings }
+    const named = header.name ? `"${header.name}" has no exercises.` : "Couldn't find any exercises in that."
+    return { workouts: [], errors: [named], warnings }
   }
 
   // Ids must be unique within a workout — they key the logging state.
@@ -100,18 +105,32 @@ function assemble(header: Header, exercises: Exercise[], warnings: string[]): Pa
 
   const name = header.name || 'Pasted workout'
   return {
-    workout: {
-      id: `${slugify(name)}-${Date.now().toString(36)}`,
-      letter: header.letter || deriveLetter(name),
-      name,
-      tag: header.tag || 'Custom',
-      lowBack: header.lowBack || undefined,
-      swapNote: header.swapNote,
-      exercises: unique,
-    },
+    workouts: [
+      {
+        id: `${slugify(name)}-${Date.now().toString(36)}-${idCounter++}`,
+        letter: header.letter || deriveLetter(name),
+        name,
+        tag: header.tag || 'Custom',
+        lowBack: header.lowBack || undefined,
+        swapNote: header.swapNote,
+        exercises: unique,
+      },
+    ],
     errors: [],
     warnings,
   }
+}
+
+/** Folds per-workout results into one, keeping every workout that parsed. */
+function combine(results: ParseResult[]): ParseResult {
+  const workouts = results.flatMap((r) => r.workouts)
+  const warnings = results.flatMap((r) => r.warnings)
+  // Errors from individual workouts only matter when nothing at all came through.
+  const errors = results.flatMap((r) => r.errors)
+  if (workouts.length > 0) {
+    return { workouts, warnings: [...warnings, ...errors], errors: [] }
+  }
+  return { workouts, warnings, errors: errors.length ? errors : ["Couldn't find any workouts in that."] }
 }
 
 /* ---------------- the spec line ---------------- */
@@ -474,10 +493,35 @@ function chunkToExercise(chunk: Chunk, warnings: string[]): Exercise | null {
   return buildExercise({ name, cue: cueLines.join(' ').trim(), cueUk, media }, spec)
 }
 
+/**
+ * A line that plainly announces a workout. Deliberately narrow — splitting on
+ * any heading would tear a workout apart whenever exercises are headings too.
+ */
+const WORKOUT_TITLE = /^(workout|day|session)\b\s*\S/i
+
 function parseText(raw: string): ParseResult {
-  const warnings: string[] = []
   const lines = normalize(raw)
-  if (lines.length === 0) return { workout: null, errors: ['Nothing to import yet.'], warnings }
+  if (lines.length === 0) return { workouts: [], errors: ['Nothing to import yet.'], warnings: [] }
+
+  // Several "Workout B …" titles means several workouts in one paste.
+  const starts = lines.reduce<number[]>((acc, line, i) => {
+    if (WORKOUT_TITLE.test(line.text)) acc.push(i)
+    return acc
+  }, [])
+
+  if (starts.length > 1) {
+    const bounds = starts[0] === 0 ? starts : [0, ...starts]
+    return combine(
+      bounds.map((start, i) => parseTextSingle(lines.slice(start, bounds[i + 1] ?? lines.length))),
+    )
+  }
+
+  return parseTextSingle(lines)
+}
+
+function parseTextSingle(lines: Line[]): ParseResult {
+  const warnings: string[] = []
+  if (lines.length === 0) return { workouts: [], errors: ['Nothing to import yet.'], warnings }
 
   // The title is the leading heading, or the first line when it doesn't itself
   // look like an exercise. Otherwise the workout goes unnamed.
@@ -635,11 +679,16 @@ function jsonExercise(value: unknown, warnings: string[]): Exercise | null {
 }
 
 function jsonWorkout(value: unknown, warnings: string[]): ParseResult {
-  if (!isBag(value)) return { workout: null, errors: ['Expected a workout object.'], warnings }
+  if (!isBag(value)) return { workouts: [], errors: ['Expected a workout object.'], warnings }
 
   const rawExercises = field(value, ['exercises', 'items', 'moves', 'movements', 'list', 'steps'])
   if (!Array.isArray(rawExercises)) {
-    return { workout: null, errors: ['That JSON has no "exercises" array.'], warnings }
+    const named = str(field(value, ['name', 'title']))
+    return {
+      workouts: [],
+      errors: [named ? `"${named}" has no "exercises" array.` : 'That JSON has no "exercises" array.'],
+      warnings,
+    }
   }
 
   const name = str(field(value, ['name', 'title', 'workout', 'workoutName'])) ?? ''
@@ -668,30 +717,28 @@ function parseJson(text: string): ParseResult {
     value = JSON.parse(text)
   } catch {
     return {
-      workout: null,
+      workouts: [],
       errors: ["That looks like JSON but it isn't valid — check for a missing comma or bracket."],
       warnings,
     }
   }
 
-  // A whole backup file, or anything wrapping a list of workouts.
+  // A whole backup file, or anything else wrapping a list of workouts.
   if (isBag(value)) {
-    const list = field(value, ['workouts'])
+    const list = field(value, ['workouts', 'plan', 'program', 'routine', 'days'])
     if (Array.isArray(list)) {
-      if (list.length === 1) return jsonWorkout(list[0], warnings)
-      return {
-        workout: null,
-        errors: [
-          `That file holds ${list.length} workouts — use "Import from file" on the Manage screen for a backup.`,
-        ],
-        warnings,
-      }
+      return combine(list.map((entry) => jsonWorkout(entry, warnings)))
     }
     return jsonWorkout(value, warnings)
   }
 
   if (Array.isArray(value)) {
-    // A bare array of exercises — usable, it just has no name of its own.
+    // An array of workout objects — each has its own exercises.
+    if (value.some((entry) => isBag(entry) && field(entry, ['exercises', 'items', 'moves', 'movements']))) {
+      return combine(value.map((entry) => jsonWorkout(entry, warnings)))
+    }
+
+    // Otherwise a bare list of exercises: usable, it just has no name.
     const exercises = value
       .map((entry) => jsonExercise(entry, warnings))
       .filter((exercise): exercise is Exercise => exercise !== null)
@@ -701,14 +748,14 @@ function parseJson(text: string): ParseResult {
     }
   }
 
-  return { workout: null, errors: ["That JSON doesn't look like a workout."], warnings }
+  return { workouts: [], errors: ["That JSON doesn't look like a workout."], warnings }
 }
 
 /* ---------------- entry point ---------------- */
 
 export function parseWorkout(text: string): ParseResult {
   const trimmed = text.trim()
-  if (!trimmed) return { workout: null, errors: ['Nothing to import yet.'], warnings: [] }
+  if (!trimmed) return { workouts: [], errors: ['Nothing to import yet.'], warnings: [] }
   const isJson = trimmed.startsWith('{') || trimmed.startsWith('[')
   return isJson ? parseJson(trimmed) : parseText(trimmed)
 }

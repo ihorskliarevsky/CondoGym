@@ -37,8 +37,11 @@ chrome, and `apple-touch-icon` supplies the icon.
 - **Workout** (`src/screens/WorkoutScreen.tsx`) — a swipeable, one-exercise-at-
   a-time deck. Swipe or use ←/→. Three logger types by exercise `type`:
   - `strength` — weight + reps per set with a done checkbox. Reps pre-fill with
-    the exercise's target, and editing one set's reps carries that number
-    forward into the later sets that haven't been logged yet.
+    the exercise's target; weight starts empty with the planned figure showing
+    as a placeholder, so nothing is logged that wasn't lifted. Editing either
+    field carries the number forward into the later sets that haven't been
+    logged yet, and checking a set off with the weight still blank logs the
+    planned figure.
   - `hold` — a countdown for timed holds.
   - `cardio` — a single "mark as done" button.
 - **History** (`src/screens/HistoryScreen.tsx`) — past sessions, expandable to
@@ -93,12 +96,16 @@ Optional extra lines: `ua: …` for a Ukrainian note, `youtube: <id or link>` or
 `gif: /demos/x.gif` for the demo visual, `letter: E` to override the badge, and
 a bare `low-back` line to file it under the low-back section.
 
-**JSON is accepted too** — an object with `name` and `exercises`, or a bare
-array of exercises. Field names are matched loosely (`exercise`/`title`/`name`,
-`reps`/`repRange`/`repetitions`, `weight`/`load`/`lb`, `notes`/`instructions`/
-`cue`), reps may be `8`, `"8-10"`, `[8,10]`, or `{min,max}`, and the exercise
-type is inferred when absent. A whole backup file is redirected to
-**Import from file**, which is the path that handles multiple workouts.
+**JSON is accepted too** — an object with `name` and `exercises`, a bare array
+of exercises, an array of whole workouts, or anything wrapping one
+(`{workouts: […]}`, `{program: […]}`, a backup file). Field names are matched
+loosely (`exercise`/`title`/`name`, `reps`/`repRange`/`repetitions`,
+`weight`/`load`/`lb`, `notes`/`instructions`/`cue`), reps may be `8`, `"8-10"`,
+`[8,10]`, or `{min,max}`, and the exercise type is inferred when absent.
+
+**Several workouts in one paste** works either way: a JSON array of them, or
+plain text where each starts with a `Workout …` / `Day …` line. One malformed
+entry is reported as a warning and the rest still import.
 
 The parser and its inverse live in
 [`src/lib/parseWorkout.ts`](src/lib/parseWorkout.ts).

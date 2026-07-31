@@ -37,8 +37,8 @@ export function saveLibrary(workouts: Workout[]): Workout[] {
   return workouts
 }
 
-export function addWorkout(workout: Workout): Workout[] {
-  return saveLibrary([...loadLibrary(), workout])
+export function addWorkouts(workouts: Workout[]): Workout[] {
+  return saveLibrary([...loadLibrary(), ...workouts])
 }
 
 export function replaceWorkout(id: string, workout: Workout): Workout[] {

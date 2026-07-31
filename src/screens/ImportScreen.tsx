@@ -8,7 +8,7 @@ interface Props {
   /** Set when editing — the workout being replaced. */
   editingName?: string
   onCancel: () => void
-  onSave: (workout: Workout) => void
+  onSave: (workouts: Workout[]) => void
 }
 
 function specLine(ex: Exercise): string {
@@ -24,6 +24,16 @@ export function ImportScreen({ initialText, editingName, onCancel, onSave }: Pro
   const [text, setText] = useState(initialText ?? '')
   const result = useMemo(() => parseWorkout(text), [text])
   const touched = text.trim().length > 0
+
+  const { workouts } = result
+  // Editing replaces one specific workout, so a multi-workout paste is ambiguous.
+  const tooMany = editingName !== undefined && workouts.length > 1
+  const canSave = workouts.length > 0 && !tooMany
+  const saveLabel = editingName
+    ? 'Save changes'
+    : workouts.length > 1
+      ? `Add ${workouts.length} workouts`
+      : 'Add to my workouts'
 
   return (
     <div className="app-shell">
@@ -78,42 +88,55 @@ export function ImportScreen({ initialText, editingName, onCancel, onSave }: Pro
           </div>
         )}
 
-        {result.workout && (
+        {tooMany && (
+          <div className="notice error">
+            <p>
+              That’s {workouts.length} workouts, but you’re editing {editingName}. Paste a single
+              workout here, or go back and use “Paste a new workout” to add them all.
+            </p>
+          </div>
+        )}
+
+        {workouts.length > 0 && (
           <div className="preview">
             <div className="section-divider">
-              <span>Preview</span>
+              <span>{workouts.length > 1 ? `Preview · ${workouts.length} workouts` : 'Preview'}</span>
               <span className="line" />
             </div>
 
-            <div className="workout-card static">
-              <div className="badge">{result.workout.letter}</div>
-              <div className="card-text">
-                <span className="card-name">{result.workout.name}</span>
-                <span className="card-tag">
-                  {result.workout.tag}
-                  {result.workout.lowBack ? ' · low-back' : ''}
-                </span>
-              </div>
-            </div>
-
-            <div className="preview-list">
-              {result.workout.exercises.map((ex) => (
-                <div className="entry" key={ex.id}>
-                  <span className="entry-name">{ex.name}</span>
-                  <span className="entry-detail">{specLine(ex)}</span>
+            {workouts.map((workout) => (
+              <div className="preview-workout" key={workout.id}>
+                <div className="workout-card static">
+                  <div className="badge">{workout.letter}</div>
+                  <div className="card-text">
+                    <span className="card-name">{workout.name}</span>
+                    <span className="card-tag">
+                      {workout.tag}
+                      {workout.lowBack ? ' · low-back' : ''}
+                    </span>
+                  </div>
                 </div>
-              ))}
-            </div>
+
+                <div className="preview-list">
+                  {workout.exercises.map((ex) => (
+                    <div className="entry" key={ex.id}>
+                      <span className="entry-name">{ex.name}</span>
+                      <span className="entry-detail">{specLine(ex)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
         <button
           type="button"
           className="finish-btn"
-          disabled={!result.workout}
-          onClick={() => result.workout && onSave(result.workout)}
+          disabled={!canSave}
+          onClick={() => canSave && onSave(workouts)}
         >
-          {editingName ? 'Save changes' : 'Add to my workouts'}
+          {saveLabel}
         </button>
 
         <details className="format-help">
@@ -143,8 +166,12 @@ export function ImportScreen({ initialText, editingName, onCancel, onSave }: Pro
               A line reading <code>low-back</code> files it under the low-back section.
             </li>
             <li>
-              JSON works too: an object with <code>name</code> and <code>exercises</code>, or just an
-              array of exercises.
+              JSON works too: an object with <code>name</code> and <code>exercises</code>, an array
+              of exercises, or an array of whole workouts.
+            </li>
+            <li>
+              Several workouts at once is fine — a JSON array of them, or plain text where each one
+              starts with a <code>Workout …</code> or <code>Day …</code> line.
             </li>
           </ul>
         </details>

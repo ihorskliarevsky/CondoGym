@@ -508,6 +508,11 @@ input[type='number'] {
   font-family: inherit;
 }
 
+.set-input::placeholder {
+  color: var(--muted2);
+  font-weight: 600;
+}
+
 .set-input:focus {
   outline: none;
   border-color: var(--accent);
@@ -843,6 +848,12 @@ input[type='number'] {
 
 .workout-card.static {
   cursor: default;
+}
+
+.preview-workout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .preview-list {

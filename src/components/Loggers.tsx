@@ -6,11 +6,13 @@ import type { ExerciseLog, SetLog } from '../types'
 
 interface StrengthProps {
   sets: SetLog[]
+  /** The planned weight, shown greyed in the empty field as a reminder. */
+  weightHint?: number
   onSetField: (index: number, field: 'weight' | 'reps', value: string) => void
   onToggleDone: (index: number) => void
 }
 
-export function StrengthLogger({ sets, onSetField, onToggleDone }: StrengthProps) {
+export function StrengthLogger({ sets, weightHint, onSetField, onToggleDone }: StrengthProps) {
   return (
     <div className="logger">
       <div className="set-row head">
@@ -27,6 +29,7 @@ export function StrengthLogger({ sets, onSetField, onToggleDone }: StrengthProps
             type="number"
             inputMode="decimal"
             aria-label={`Set ${i + 1} weight`}
+            placeholder={weightHint === undefined ? '' : String(weightHint)}
             value={s.weight}
             onChange={(e) => onSetField(i, 'weight', e.target.value)}
           />

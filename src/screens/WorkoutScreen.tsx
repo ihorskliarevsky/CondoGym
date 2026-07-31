@@ -96,22 +96,30 @@ export function WorkoutScreen({ workout, onExit }: Props) {
       const log = prev[exId]
       if (log.type !== 'strength') return prev
       const sets = log.sets.map((s, idx) => (idx === i ? { ...s, [field]: value } : s))
-      // Editing reps carries the number forward into every later set that
-      // hasn't been logged yet — the usual case is doing the same reps again.
-      if (field === 'reps') {
-        for (let j = i + 1; j < sets.length; j++) {
-          if (!sets[j].done) sets[j] = { ...sets[j], reps: value }
-        }
+      // Editing a set carries the number forward into every later set that
+      // hasn't been logged yet — the usual case is repeating the same figure.
+      for (let j = i + 1; j < sets.length; j++) {
+        if (!sets[j].done) sets[j] = { ...sets[j], [field]: value }
       }
       return { ...prev, [exId]: { ...log, sets } }
     })
   }
 
   function toggleSetDone(exId: string, i: number) {
+    const exercise = workout.exercises.find((ex) => ex.id === exId)
+    const planned = exercise?.type === 'strength' ? exercise.defaultWeight : undefined
+
     setLogs((prev) => {
       const log = prev[exId]
       if (log.type !== 'strength') return prev
-      const sets = log.sets.map((s, idx) => (idx === i ? { ...s, done: !s.done } : s))
+      const sets = log.sets.map((s, idx) => {
+        if (idx !== i) return s
+        const done = !s.done
+        // Checking off a set with the weight left blank logs the planned figure
+        // that was showing as the placeholder.
+        const takePlan = done && !s.weight.trim() && planned !== undefined
+        return { ...s, done, weight: takePlan ? String(planned) : s.weight }
+      })
       return { ...prev, [exId]: { ...log, sets } }
     })
   }

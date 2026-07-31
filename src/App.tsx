@@ -4,7 +4,7 @@ import { HomeScreen } from './screens/HomeScreen'
 import { ImportScreen } from './screens/ImportScreen'
 import { ManageScreen } from './screens/ManageScreen'
 import { WorkoutScreen } from './screens/WorkoutScreen'
-import { addWorkout, loadLibrary, replaceWorkout } from './lib/library'
+import { addWorkouts, loadLibrary, replaceWorkout } from './lib/library'
 import { workoutToText } from './lib/parseWorkout'
 import type { Workout } from './types'
 
@@ -59,8 +59,10 @@ export default function App() {
           initialText={editing ? workoutToText(editing) : undefined}
           editingName={editing?.name}
           onCancel={manage}
-          onSave={(workout) => {
-            setLibrary(editing ? replaceWorkout(editing.id, workout) : addWorkout(workout))
+          onSave={(workouts) => {
+            setLibrary(
+              editing ? replaceWorkout(editing.id, workouts[0]) : addWorkouts(workouts),
+            )
             manage()
           }}
         />

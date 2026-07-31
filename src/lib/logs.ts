@@ -13,8 +13,10 @@ function initExerciseLog(ex: Exercise): ExerciseLog {
   if (ex.type === 'strength') {
     return {
       type: 'strength',
+      // Weight starts empty — the planned figure shows as a placeholder instead,
+      // so nothing gets logged that wasn't actually lifted.
       sets: Array.from({ length: ex.sets }, () => ({
-        weight: ex.defaultWeight !== undefined ? String(ex.defaultWeight) : '',
+        weight: '',
         reps: String(ex.repTarget),
         done: false,
       })),

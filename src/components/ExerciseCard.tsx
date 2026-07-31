@@ -50,7 +50,12 @@ export function ExerciseCard({
       )}
 
       {log.type === 'strength' && (
-        <StrengthLogger sets={log.sets} onSetField={onSetField} onToggleDone={onToggleSetDone} />
+        <StrengthLogger
+          sets={log.sets}
+          weightHint={exercise.type === 'strength' ? exercise.defaultWeight : undefined}
+          onSetField={onSetField}
+          onToggleDone={onToggleSetDone}
+        />
       )}
       {log.type === 'hold' && (
         <HoldLogger
