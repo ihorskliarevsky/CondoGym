@@ -120,7 +120,15 @@ export function ImportScreen({ initialText, editingName, onCancel, onSave }: Pro
                 <div className="preview-list">
                   {workout.exercises.map((ex) => (
                     <div className="entry" key={ex.id}>
-                      <span className="entry-name">{ex.name}</span>
+                      <span className="entry-name">
+                        {ex.name}
+                        {/* Confirms the link was picked up, before you save. */}
+                        {ex.media && (
+                          <span className="entry-media" title={`Demo: ${ex.media.kind}`}>
+                            ▶ demo
+                          </span>
+                        )}
+                      </span>
                       <span className="entry-detail">{specLine(ex)}</span>
                     </div>
                   ))}

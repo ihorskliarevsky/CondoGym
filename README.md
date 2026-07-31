@@ -92,7 +92,13 @@ Volume specs are matched loosely, anywhere on the line:
 | `60s hold` / `60 second hold` | a timed hold with a countdown |
 | `40s cardio` / `cardio` | a single "mark as done" |
 
-A YouTube link is picked up wherever it appears — on its own line, labelled
+In JSON, a link is found wherever it sits — any key name, and at any nesting
+depth (`video: {url}`, `links: [ … ]`, buried in a description). When something
+video-shaped can't yield an id (a channel or playlist link), the import warns and
+names the exercise instead of silently showing no demo. The preview tags every
+exercise that got one with a **▶ demo** badge, so it's visible before saving.
+
+In text, a YouTube link is picked up wherever it appears — on its own line, labelled
 `youtube:`/`video:`, appended to the exercise line, or mid-sentence in a cue —
 in `watch?v=`, `youtu.be`, `shorts`, `embed`, mobile, and timestamped forms. A
 `.gif` URL or path works the same way. Other optional lines: `ua: …` for a

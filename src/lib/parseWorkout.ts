@@ -522,6 +522,13 @@ function chunkToExercise(chunk: Chunk, warnings: string[]): Exercise | null {
     spec = { type: 'cardio' }
   }
 
+  if (!media) {
+    const suspect = cueLines.find((line) => /youtu|vimeo|\.mp4\b/i.test(line))
+    if (suspect && !warnings.some((w) => w.includes(suspect))) {
+      warnings.push(`${name}: couldn't read a video id from "${suspect}".`)
+    }
+  }
+
   return buildExercise({ name, cue: cueLines.join(' ').trim(), cueUk, media }, spec)
 }
 
@@ -605,6 +612,15 @@ function field(bag: Bag, names: string[]): unknown {
   return undefined
 }
 
+/** Every string anywhere inside a value, at any nesting depth. */
+function deepStrings(value: unknown, out: string[] = [], depth = 0): string[] {
+  if (depth > 6) return out
+  if (typeof value === 'string') out.push(value)
+  else if (Array.isArray(value)) for (const item of value) deepStrings(item, out, depth + 1)
+  else if (isBag(value)) for (const item of Object.values(value)) deepStrings(item, out, depth + 1)
+  return out
+}
+
 function num(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
@@ -686,13 +702,26 @@ function jsonExercise(value: unknown, warnings: string[]): Exercise | null {
     }
   }
 
-  // Last resort: a link sitting inside one of the text fields.
+  // Last resort: a link anywhere in the entry, however deeply it's nested —
+  // `"video": {"url": …}` and `"links": [ … ]` are both common shapes.
   if (!media) {
-    const haystack = Object.values(value)
-      .filter((v): v is string => typeof v === 'string')
-      .join(' ')
+    const haystack = deepStrings(value).join(' ')
     const found = YOUTUBE_URL.exec(haystack)
-    if (found) media = { kind: 'youtube', id: found[1] }
+    if (found) {
+      media = { kind: 'youtube', id: found[1] }
+    } else {
+      const gifFound = GIF_URL.exec(haystack)
+      if (gifFound) media = { kind: 'gif', src: gifFound[0] }
+    }
+  }
+
+  // Say so when something video-shaped was there but unusable, rather than
+  // silently showing "no demo" and leaving the reason a mystery.
+  if (!media) {
+    const suspect = deepStrings(value).find((s) => /youtu|vimeo|\.mp4\b/i.test(s))
+    if (suspect && !warnings.some((w) => w.includes(suspect))) {
+      warnings.push(`${name}: couldn't read a video id from "${suspect}".`)
+    }
   }
 
   const rest = num(field(value, ['rest', 'restSeconds', 'restS', 'restTime']))
