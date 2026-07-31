@@ -83,6 +83,22 @@ tile; a YouTube clip only loads its iframe once the tile is expanded, so
 swiping through a workout doesn't pull an embed per exercise. GIFs go in
 `public/demos/` and are referenced as `/demos/name.gif`.
 
+## Backup
+
+**Manage → Export to file** downloads `condo-gym-YYYY-MM-DD.json` holding every
+workout and every logged session. On iOS this opens the share sheet, so it can
+go straight to Files or iCloud.
+
+**Import from file** reads one back and asks how to apply it:
+
+- **Merge** adds only what isn't already there, matched by id — safe to run
+  against a phone that has its own sessions on it.
+- **Replace** swaps both lists for the file's contents.
+
+Malformed entries are dropped rather than failing the whole import, and the
+screen names the problem when a file isn't a usable backup at all. See
+[`src/lib/backup.ts`](src/lib/backup.ts).
+
 ## Storage
 
 Three `localStorage` keys:

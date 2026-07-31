@@ -39,6 +39,13 @@ export function deleteSession(id: string): Session[] {
   return next
 }
 
+/** Used by backup restore. Kept newest-first, which is the order History reads. */
+export function saveSessions(sessions: Session[]): Session[] {
+  const sorted = [...sessions].sort((a, b) => b.date.localeCompare(a.date))
+  write(SESSIONS_KEY, sorted)
+  return sorted
+}
+
 /** An in-progress workout, so a refresh mid-session doesn't lose reps. */
 export interface Draft {
   workoutId: string

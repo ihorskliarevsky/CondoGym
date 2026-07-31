@@ -1,6 +1,11 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { applyBackup, downloadBackup, readBackup, type BackupSummary } from '../lib/backup'
 import { countMissingDefaults, moveWorkout, removeWorkout, restoreDefaults } from '../lib/library'
 import type { Workout } from '../types'
+
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
+}
 
 interface Props {
   library: Workout[]
@@ -12,7 +17,36 @@ interface Props {
 
 export function ManageScreen({ library, onLibraryChange, onAdd, onEdit, onBack }: Props) {
   const [pendingDelete, setPendingDelete] = useState<Workout | null>(null)
+  const [pendingImport, setPendingImport] = useState<BackupSummary | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
   const missing = countMissingDefaults(library)
+
+  async function onFilePicked(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    // Reset the input so picking the same file twice still fires a change.
+    event.target.value = ''
+    if (!file) return
+
+    setImportError(null)
+    setNote(null)
+    const { summary, error } = readBackup(await file.text())
+    if (error) setImportError(error)
+    else setPendingImport(summary)
+  }
+
+  function runImport(mode: 'merge' | 'replace') {
+    if (!pendingImport) return
+    const { backup, newWorkouts, newSessions } = pendingImport
+    onLibraryChange(applyBackup(backup, mode))
+    setNote(
+      mode === 'replace'
+        ? `Replaced everything with the backup: ${count(backup.workouts.length, 'workout')} and ${count(backup.sessions.length, 'session')}.`
+        : `Added ${count(newWorkouts, 'workout')} and ${count(newSessions, 'session')}.`,
+    )
+    setPendingImport(null)
+  }
 
   return (
     <div className="app-shell">
@@ -88,7 +122,73 @@ export function ManageScreen({ library, onLibraryChange, onAdd, onEdit, onBack }
             Restore {missing} built-in workout{missing === 1 ? '' : 's'}
           </button>
         )}
+
+        <div className="section-divider">
+          <span>Backup</span>
+          <span className="line" />
+        </div>
+
+        <p className="import-hint">
+          Your workouts and history live only in this browser. Export a file to keep a copy or move
+          everything to another phone.
+        </p>
+
+        <div className="backup-actions">
+          <button type="button" className="pill-ghost" onClick={downloadBackup}>
+            Export to file
+          </button>
+          <button type="button" className="pill-ghost" onClick={() => fileInput.current?.click()}>
+            Import from file
+          </button>
+        </div>
+
+        <input
+          ref={fileInput}
+          type="file"
+          accept="application/json,.json"
+          className="visually-hidden"
+          onChange={onFilePicked}
+        />
+
+        {importError && (
+          <div className="notice error">
+            <p>{importError}</p>
+          </div>
+        )}
+        {note && (
+          <div className="notice warn">
+            <p>{note}</p>
+          </div>
+        )}
       </div>
+
+      {pendingImport && (
+        <div className="sheet-backdrop" onClick={() => setPendingImport(null)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <p className="sheet-title">Import this backup?</p>
+            <p className="sheet-body">
+              It holds {count(pendingImport.backup.workouts.length, 'workout')} and{' '}
+              {count(pendingImport.backup.sessions.length, 'session')} from{' '}
+              {new Date(pendingImport.backup.exportedAt).toLocaleDateString()}.
+              <br />
+              <strong>Merge</strong> adds the {count(pendingImport.newWorkouts, 'workout')} and{' '}
+              {count(pendingImport.newSessions, 'session')} you don’t already have.{' '}
+              <strong>Replace</strong> discards what’s here now.
+            </p>
+            <div className="sheet-actions">
+              <button type="button" className="pill-ghost" onClick={() => setPendingImport(null)}>
+                Cancel
+              </button>
+              <button type="button" className="pill-danger" onClick={() => runImport('replace')}>
+                Replace
+              </button>
+              <button type="button" className="pill-primary" onClick={() => runImport('merge')}>
+                Merge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingDelete && (
         <div className="sheet-backdrop" onClick={() => setPendingDelete(null)}>
