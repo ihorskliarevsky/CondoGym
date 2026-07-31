@@ -15,6 +15,21 @@ npm run dev
 app is a PWA — open it on a phone and "Add to Home Screen" for a standalone,
 full-screen install.
 
+## Deploying
+
+Pushing to `main` builds and publishes to GitHub Pages via
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Enable it once
+under **Settings → Pages → Source: GitHub Actions**.
+
+The build uses `base: './'` and every asset path in `index.html` and the
+manifest is relative, so the site works from a project subpath
+(`username.github.io/CondoGym/`) as well as a domain root. Keep it that way —
+an absolute `/icon.svg` would 404 on Pages.
+
+On iOS, Share → **Add to Home Screen** installs it as a standalone app:
+`display: standalone` plus `apple-mobile-web-app-capable` means no Safari
+chrome, and `apple-touch-icon` supplies the icon.
+
 ## Screens
 
 - **Home** (`src/screens/HomeScreen.tsx`) — the workout list, split into the
