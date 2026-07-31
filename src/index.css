@@ -24,11 +24,14 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: 'Manrope', system-ui, sans-serif;
-  overscroll-behavior: none;
+  /* Only block sideways chaining (the deck swipes horizontally). Leaving the
+     vertical axis alone keeps iOS pull-to-refresh working in the installed app,
+     which is the only way to pick up a new build. */
+  overscroll-behavior-x: none;
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 a {
@@ -46,12 +49,25 @@ a:hover {
 .app-shell {
   max-width: 480px;
   margin: 0 auto;
-  min-height: 100vh;
-  height: 100vh;
+  /* dvh, not vh: in an installed iOS app vh includes the strip behind the home
+     indicator, so the footer ends up below the visible area with nothing to
+     scroll. The insets keep content clear of the notch and the indicator —
+     viewport-fit=cover deliberately extends the background under both. */
+  height: 100dvh;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
   background: var(--bg);
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+@supports not (height: 100dvh) {
+  .app-shell {
+    height: 100vh;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -721,6 +737,14 @@ input[type='number'] {
 
 .backup-actions > * {
   flex: 1;
+}
+
+.build-stamp {
+  margin: 0;
+  text-align: center;
+  color: var(--muted2);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .visually-hidden {

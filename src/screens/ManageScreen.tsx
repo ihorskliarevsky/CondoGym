@@ -7,6 +7,24 @@ function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
+/**
+ * An installed home-screen app serves index.html from cache, so a plain reload
+ * can keep showing the old build. A one-off query string is a URL the cache has
+ * never seen, which forces a fresh fetch of the HTML and its hashed assets.
+ */
+function reloadFresh(): void {
+  const url = new URL(window.location.href)
+  url.searchParams.set('v', Date.now().toString(36))
+  window.location.replace(url.toString())
+}
+
+function buildStamp(): string {
+  const date = new Date(__BUILD_TIME__)
+  return Number.isNaN(date.getTime())
+    ? 'dev'
+    : `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+}
+
 interface Props {
   library: Workout[]
   onLibraryChange: (workouts: Workout[]) => void
@@ -160,6 +178,22 @@ export function ManageScreen({ library, onLibraryChange, onAdd, onEdit, onBack }
             <p>{note}</p>
           </div>
         )}
+
+        <div className="section-divider">
+          <span>App</span>
+          <span className="line" />
+        </div>
+
+        <p className="import-hint">
+          Installed to the home screen, this app keeps its own copy and won’t pick up a new version
+          on its own.
+        </p>
+
+        <button type="button" className="pill-ghost" onClick={reloadFresh}>
+          Check for a new version
+        </button>
+
+        <p className="build-stamp">Build {buildStamp()}</p>
       </div>
 
       {pendingImport && (
