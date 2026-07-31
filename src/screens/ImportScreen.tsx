@@ -38,8 +38,8 @@ export function ImportScreen({ initialText, editingName, onCancel, onSave }: Pro
 
       <div className="import">
         <p className="import-hint">
-          Paste your workout as plain text. Blank line between blocks: the first block is the workout
-          name, each block after it is one exercise — name, then the sets line, then the form cue.
+          Paste a workout in whatever shape you have it — plain text, a bulleted or numbered list,
+          markdown, a table, or JSON. Check the preview below before saving.
         </p>
 
         <textarea
@@ -117,31 +117,34 @@ export function ImportScreen({ initialText, editingName, onCancel, onSave }: Pro
         </button>
 
         <details className="format-help">
-          <summary>Format cheat sheet</summary>
+          <summary>What it understands</summary>
           <ul>
             <li>
-              <code>Workout E — Push + Core</code> — first block: name, then an em dash or a pipe,
-              then the focus tag.
+              The first line names the workout. <code>Workout E — Push + Core</code> also sets the
+              focus tag.
             </li>
             <li>
-              <code>4 x 8-10 @ 20lb, rest 90s</code> — strength. Weight and rest are optional; write{' '}
-              <code>bodyweight</code> for no load, <code>3 x 10 / side</code> for per-side reps.
+              Sets and reps in most shapes: <code>4 x 8-10</code>, <code>3 sets of 10</code>,{' '}
+              <code>10 reps x 3 sets</code>, <code>3 x 10 / side</code>, <code>4 sets AMRAP</code>.
             </li>
             <li>
-              <code>60s hold</code> — a timed hold with a countdown.
+              <code>@ 20lb</code> or <code>bodyweight</code> for load, <code>rest 90s</code> for rest
+              — both optional, anywhere on the line.
             </li>
             <li>
-              <code>60s cardio</code> or just <code>cardio</code> — a single "mark as done".
+              <code>60s hold</code> gives a countdown; <code>40s cardio</code> or <code>cardio</code>{' '}
+              gives a single "mark as done".
             </li>
             <li>
-              Any other line is the form cue. <code>ua: …</code> adds a Ukrainian note.
+              Anything left over becomes the form cue. <code>ua: …</code> adds a Ukrainian note,{' '}
+              <code>youtube: …</code> or <code>gif: …</code> adds the demo.
             </li>
             <li>
-              <code>youtube: …</code> (id or link) or <code>gif: /demos/x.gif</code> adds the demo
-              visual.
+              A line reading <code>low-back</code> files it under the low-back section.
             </li>
             <li>
-              Add a line reading <code>low-back</code> to file it under the low-back section.
+              JSON works too: an object with <code>name</code> and <code>exercises</code>, or just an
+              array of exercises.
             </li>
           </ul>
         </details>

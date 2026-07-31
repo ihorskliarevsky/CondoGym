@@ -1,25 +1,13 @@
 import type { Exercise, ExerciseMedia, Workout } from '../types'
 
 /**
- * Turns pasted plain text into a Workout.
+ * Turns whatever the user pasted into a Workout.
  *
- * The format is deliberately loose — it's meant to survive being typed by hand
- * or pasted out of a notes app. Blocks are separated by blank lines: the first
- * block names the workout, every block after it is one exercise.
- *
- *   Workout E — Push + Core
- *
- *   Dumbbell Bench Press
- *   4 x 8-10 @ 20lb, rest 90s
- *   Lower with control to chest level.
- *
- *   Plank
- *   60s hold
- *   Ribs down, glutes tight.
- *
- * An exercise can also be written on a single line with pipes:
- *
- *   Dumbbell Bench Press | 4x8-10 @ 20lb, rest 90s | Lower with control.
+ * The guiding rule is that nothing is rejected for formatting. Plain text,
+ * markdown headings, numbered or bulleted lists, tables, one-line-per-exercise,
+ * and JSON all go in. Anything unrecognised becomes part of the form cue rather
+ * than an error, and the caller shows a preview so the result can be eyeballed
+ * before it's saved.
  */
 
 export interface ParseResult {
@@ -28,7 +16,7 @@ export interface ParseResult {
   warnings: string[]
 }
 
-/* ---------------- helpers ---------------- */
+/* ---------------- shared helpers ---------------- */
 
 function slugify(text: string): string {
   return (
@@ -40,40 +28,20 @@ function slugify(text: string): string {
   )
 }
 
-/** Splits on blank lines, dropping comment lines and trailing whitespace. */
-function toBlocks(text: string): string[][] {
-  const blocks: string[][] = []
-  let current: string[] = []
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim()
-    if (line.startsWith('#') || line.startsWith('//')) continue
-    if (!line) {
-      if (current.length) blocks.push(current)
-      current = []
-      continue
-    }
-    current.push(line)
-  }
-  if (current.length) blocks.push(current)
-  return blocks
+/** "Workout E" → E; otherwise the first letter of the name. */
+function deriveLetter(name: string, explicit?: string): string {
+  const letter =
+    explicit || /workout\s+([a-z0-9])\b/i.exec(name)?.[1] || name.replace(/[^a-z0-9]/gi, '')[0] || '?'
+  return letter.slice(0, 1).toUpperCase()
 }
 
-/** Pulls `key: value` off a line, case-insensitively. */
-function fieldValue(line: string, keys: string[]): string | null {
-  const match = /^([a-zЀ-ӿ-]+)\s*:\s*(.*)$/i.exec(line)
-  if (!match) return null
-  return keys.includes(match[1].toLowerCase()) ? match[2].trim() : null
+interface Header {
+  name: string
+  tag: string
+  letter: string
+  lowBack: boolean
+  swapNote?: string
 }
-
-function parseMedia(value: string, kind: 'youtube' | 'gif'): ExerciseMedia | null {
-  if (!value) return null
-  if (kind === 'gif') return { kind: 'gif', src: value }
-  // Accept a bare id or any of the usual YouTube URL shapes.
-  const id = /(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{6,})/.exec(value)?.[1] ?? value
-  return /^[A-Za-z0-9_-]{6,}$/.test(id) ? { kind: 'youtube', id } : null
-}
-
-/* ---------------- the spec line ---------------- */
 
 interface Spec {
   type: Exercise['type']
@@ -85,119 +53,375 @@ interface Spec {
   weight?: number
 }
 
+function parseMedia(value: string, kind: 'youtube' | 'gif'): ExerciseMedia | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (kind === 'gif') return { kind: 'gif', src: trimmed }
+  // Accept a bare id or any of the usual YouTube URL shapes.
+  const id = /(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{6,})/.exec(trimmed)?.[1] ?? trimmed
+  return /^[A-Za-z0-9_-]{6,}$/.test(id) ? { kind: 'youtube', id } : null
+}
+
+/** Builds the typed Exercise from a resolved spec. */
+function buildExercise(
+  base: { name: string; cue: string; cueUk?: string; media?: ExerciseMedia },
+  spec: Spec,
+): Exercise {
+  const common = { ...base, id: slugify(base.name), rest: spec.rest }
+  if (spec.type === 'strength') {
+    return {
+      ...common,
+      type: 'strength',
+      sets: spec.sets ?? 3,
+      repTarget: spec.repTarget ?? 10,
+      repRange: spec.repRange ?? String(spec.repTarget ?? 10),
+      defaultWeight: spec.weight,
+    }
+  }
+  if (spec.type === 'hold') {
+    return { ...common, type: 'hold', duration: spec.duration ?? 30 }
+  }
+  return { ...common, type: 'cardio', duration: spec.duration }
+}
+
+/** Shared tail of both parsers: unique ids, then the finished workout. */
+function assemble(header: Header, exercises: Exercise[], warnings: string[]): ParseResult {
+  if (exercises.length === 0) {
+    return { workout: null, errors: ["Couldn't find any exercises in that."], warnings }
+  }
+
+  // Ids must be unique within a workout — they key the logging state.
+  const seen = new Map<string, number>()
+  const unique = exercises.map((exercise) => {
+    const count = seen.get(exercise.id) ?? 0
+    seen.set(exercise.id, count + 1)
+    return count === 0 ? exercise : { ...exercise, id: `${exercise.id}-${count + 1}` }
+  })
+
+  const name = header.name || 'Pasted workout'
+  return {
+    workout: {
+      id: `${slugify(name)}-${Date.now().toString(36)}`,
+      letter: header.letter || deriveLetter(name),
+      name,
+      tag: header.tag || 'Custom',
+      lowBack: header.lowBack || undefined,
+      swapNote: header.swapNote,
+      exercises: unique,
+    },
+    errors: [],
+    warnings,
+  }
+}
+
+/* ---------------- the spec line ---------------- */
+
+/** Where a spec starts inside a longer line, e.g. "Goblet Squat 4x10". */
+const SPEC_ANCHOR =
+  /\b(\d+\s*(?:sets?|x|×|\*)\s*(?:of\s*)?\d|\d+\s*(?:-\s*\d+\s*)?reps?\b|\d+\s*(?:s|sec|secs|seconds|min|mins|minutes?)\b|amrap|bodyweight|to failure)/i
+
 /**
- * Recognises the "4 x 8-10 @ 20lb, rest 90s" line. Returns null for anything
- * that doesn't look like a spec, so prose falls through to the cue.
+ * Recognises a volume spec in many shapes: "4x8-10", "3 sets of 10",
+ * "10 reps x 3 sets", "60s hold", "40s cardio", each with optional
+ * "@ 20lb" and "rest 90s". Returns null when the line is prose.
  */
 function parseSpec(line: string): Spec | null {
   const text = line.toLowerCase()
 
-  const rest = /rest\s*:?\s*(\d+)/.exec(text) ?? /(\d+)\s*s(?:ec)?\s*rest/.exec(text)
-  const restSeconds = rest ? Number(rest[1]) : undefined
+  const restMatch = /rest\s*:?\s*(\d+)/.exec(text) ?? /(\d+)\s*s(?:ec)?\s*rest/.exec(text)
+  const rest = restMatch ? Number(restMatch[1]) : undefined
 
-  // "3 x 10", "3x8-10", "3 × 10 / side"
-  const setsReps = /(\d+)\s*[x×*]\s*(\d+)\s*(?:-\s*(\d+))?\s*(\/\s*side|per\s*side)?/.exec(text)
-  const holdMatch =
-    /(\d+)\s*(?:s|sec|secs|seconds)?\s*hold/.exec(text) ?? /hold\s*(?:for\s*)?(\d+)/.exec(text)
-  const isCardio = /\bcardio\b|\bround\b|\bflow\b/.test(text)
-  const bareSeconds = /^\s*(\d+)\s*(?:s|sec|secs|seconds|min|minutes?)\b/.exec(text)
+  const perSide = /\/\s*side|per\s*side|each\s*side|\be\/s\b/.test(text)
+  const weightMatch =
+    /@\s*(\d+(?:\.\d+)?)/.exec(text) ?? /(\d+(?:\.\d+)?)\s*(?:lb|lbs|kg|pounds?)\b/.exec(text)
+  const bodyweight = /\bbody\s*weight\b|\bbw\b/.test(text)
+  const weight = weightMatch ? Number(weightMatch[1]) : bodyweight ? 0 : undefined
 
-  if (holdMatch) {
-    return { type: 'hold', duration: Number(holdMatch[1]), rest: restSeconds }
+  const hold = /(\d+)\s*(?:s|sec|secs|seconds|min|mins|minutes?)?\s*(?:-?\s*second)?\s*hold/.exec(text)
+    ?? /hold\s*(?:for\s*)?(\d+)/.exec(text)
+  const isCardio = /\bcardio\b|\bround\b|\bflow\b|\bwalk\b|\bcarry\b/.test(text)
+
+  // "4 x 8-10", "4x8", "3 sets of 10", "3 sets x 12"
+  const setsFirst = /(\d+)\s*(?:sets?\s*(?:of|x|×)?|[x×*])\s*(\d+)\s*(?:-\s*(\d+))?/.exec(text)
+  // "10 reps x 3 sets", "8-10 reps, 3 sets"
+  const repsFirst = /(\d+)\s*(?:-\s*(\d+))?\s*reps?\b[^.]*?(\d+)\s*sets?/.exec(text)
+  // "3 sets to failure", "4 sets AMRAP"
+  const openEnded = /(\d+)\s*sets?\b/.exec(text)
+  const failure = /\bamrap\b|to failure|max reps?/.test(text)
+
+  if (hold && !setsFirst && !repsFirst) {
+    const value = Number(hold[1])
+    return { type: 'hold', duration: /min/.test(hold[0]) ? value * 60 : value, rest }
   }
 
-  if (setsReps) {
-    const [, setsStr, lowStr, highStr, perSide] = setsReps
-    const low = Number(lowStr)
-    const range = highStr ? `${low}-${Number(highStr)}` : String(low)
-    // Weight: "@ 20", "20lb", or an explicit bodyweight marker.
-    const weightMatch = /@\s*(\d+(?:\.\d+)?)/.exec(text) ?? /(\d+(?:\.\d+)?)\s*(?:lb|lbs|kg)\b/.exec(text)
-    const bodyweight = /\bbody\s*weight\b|\bbw\b/.test(text)
+  if (setsFirst || repsFirst) {
+    const [sets, low, high] = setsFirst
+      ? [Number(setsFirst[1]), Number(setsFirst[2]), setsFirst[3] ? Number(setsFirst[3]) : undefined]
+      : [Number(repsFirst![3]), Number(repsFirst![1]), repsFirst![2] ? Number(repsFirst![2]) : undefined]
+    const range = high ? `${low}-${high}` : String(low)
     return {
       type: 'strength',
-      sets: Number(setsStr),
+      sets,
       repTarget: low,
       repRange: perSide ? `${range} / side` : range,
-      rest: restSeconds,
-      weight: weightMatch ? Number(weightMatch[1]) : bodyweight ? 0 : undefined,
+      rest,
+      weight,
     }
   }
 
-  if (bareSeconds) {
-    const value = Number(bareSeconds[1])
-    const seconds = /min/.test(bareSeconds[0]) ? value * 60 : value
-    return { type: isCardio ? 'cardio' : 'hold', duration: seconds, rest: restSeconds }
+  if (openEnded && failure) {
+    return { type: 'strength', sets: Number(openEnded[1]), repTarget: 10, repRange: 'AMRAP', rest, weight }
   }
 
-  if (isCardio) return { type: 'cardio', rest: restSeconds }
+  // A bare duration: "45s", "2 min".
+  const bare = /(?:^|\s)(\d+)\s*(s|sec|secs|seconds|min|mins|minutes?)\b/.exec(text)
+  if (bare) {
+    const value = Number(bare[1])
+    const seconds = bare[2].startsWith('min') ? value * 60 : value
+    return { type: isCardio ? 'cardio' : 'hold', duration: seconds, rest }
+  }
+
+  if (isCardio) return { type: 'cardio', rest }
+  if (openEnded) return { type: 'strength', sets: Number(openEnded[1]), rest, weight }
 
   return null
 }
 
-/* ---------------- blocks ---------------- */
+/* ---------------- text ---------------- */
 
-interface Header {
-  name: string
-  tag: string
-  letter: string
-  lowBack: boolean
-  swapNote?: string
+interface Line {
+  text: string
+  /** Started with a bullet, number, or heading marker at the left margin. */
+  marked: boolean
+  heading: boolean
+  blankBefore: boolean
 }
 
-function parseHeader(lines: string[]): Header {
+/** Cells of a markdown table's column-header row. */
+const TABLE_HEADING =
+  /^(#|exercise|movement|name|sets?|reps?|sets?\s*[x×/]\s*reps?|rest|weight|load|tempo|notes?|cue|type|duration|time)$/i
+
+/** Field lines are always part of the exercise above them, never a new one. */
+const CONTINUATION_FIELDS = [
+  'cue',
+  'note',
+  'notes',
+  'tip',
+  'form',
+  'ua',
+  'uk',
+  'укр',
+  'ua-cue',
+  'youtube',
+  'yt',
+  'video',
+  'link',
+  'gif',
+  'image',
+  'img',
+]
+
+/** Strips markdown so the classifier sees plain sentences. */
+function normalize(raw: string): Line[] {
+  const lines: Line[] = []
+  let blankBefore = false
+
+  for (const original of raw.split(/\r?\n/)) {
+    let text = original.trim()
+
+    if (!text) {
+      blankBefore = true
+      continue
+    }
+
+    // An indented line is a sub-item of the line above — a cue under a bullet,
+    // not a new exercise — so its own bullet marker doesn't count.
+    const indented = /^\s{2,}|\t/.test(original)
+    // Horizontal rules and markdown table separators carry no content.
+    if (/^[-=_*]{3,}$/.test(text) || /^\|?[\s:|-]+\|?$/.test(text)) continue
+
+    // A table row becomes "cell — cell — cell". Each row is its own exercise,
+    // and the column-header row carries no workout content.
+    let tableRow = false
+    if (text.startsWith('|') && text.endsWith('|')) {
+      const cells = text
+        .slice(1, -1)
+        .split('|')
+        .map((cell) => cell.trim())
+        .filter(Boolean)
+      if (cells.every((cell) => TABLE_HEADING.test(cell))) continue
+      text = cells.join(' — ')
+      tableRow = true
+    }
+
+    const heading = /^#{1,6}\s+/.test(text)
+    const bullet = /^([-*•+]|\d+[.)])\s+/.test(text)
+    text = text
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^([-*•+]|\d+[.)])\s+/, '')
+      .replace(/\*\*|__|`/g, '')
+      .trim()
+
+    if (!text) continue
+    lines.push({
+      text,
+      marked: tableRow || ((heading || bullet) && !indented),
+      heading: heading && !indented,
+      blankBefore: blankBefore && !indented,
+    })
+    blankBefore = false
+  }
+
+  return lines
+}
+
+/** Pulls `key: value` off a line, case-insensitively. */
+function fieldValue(line: string, keys: string[]): string | null {
+  const match = /^([a-zЀ-ӿ_-]+)\s*:\s*(.*)$/i.exec(line)
+  if (!match) return null
+  return keys.includes(match[1].toLowerCase()) ? match[2].trim() : null
+}
+
+/**
+ * A short, title-like line with no sentence punctuation — the shape of an
+ * exercise name rather than a cue.
+ */
+function looksLikeName(text: string): boolean {
+  return (
+    text.length <= 48 &&
+    text.split(/\s+/).length <= 6 &&
+    !/[.!?;]$/.test(text) &&
+    !fieldValue(text, ['cue', 'note', 'notes', 'tip', 'ua', 'uk', 'youtube', 'video', 'gif'])
+  )
+}
+
+/** Splits "Goblet Squat — 4x10 @ 20lb — chest up" into its pieces. */
+function splitHeadLine(text: string): { name: string; rest: string[] } {
+  const parts = text
+    .split(/\s*[—–|·]\s*|\s+-\s+|\s*:\s+(?=\d)/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  if (parts.length > 1) return { name: parts[0], rest: parts.slice(1) }
+
+  // No separator — look for where a spec starts inside the line.
+  const anchor = SPEC_ANCHOR.exec(text)
+  if (anchor && anchor.index > 0) {
+    return {
+      name: text.slice(0, anchor.index).replace(/[,:(\-–—\s]+$/, '').trim(),
+      rest: [text.slice(anchor.index).replace(/\)$/, '')],
+    }
+  }
+  return { name: text, rest: [] }
+}
+
+interface Chunk {
+  head: string
+  body: string[]
+}
+
+/**
+ * Groups lines into one chunk per exercise. Blank lines and list markers are
+ * used when present; when they aren't, a short title-like line following a
+ * spec is taken as the start of the next exercise.
+ */
+function chunkExercises(lines: Line[]): Chunk[] {
+  const chunks: Chunk[] = []
+  let current: Chunk | null = null
+  let sawSpec = false
+
+  for (const line of lines) {
+    const isSpec = parseSpec(line.text) !== null
+    const isField = fieldValue(line.text, CONTINUATION_FIELDS) !== null
+
+    // "Hip Flexor Stretch — 45s hold" is a name *and* a spec: once the current
+    // exercise has its own spec, that shape means the next exercise has begun.
+    const split = splitHeadLine(line.text)
+    const nameThenSpec = split.rest.length > 0 && looksLikeName(split.name)
+
+    const startsNew =
+      !current ||
+      (!isField &&
+        (line.marked ||
+          line.blankBefore ||
+          (sawSpec && (nameThenSpec || (!isSpec && looksLikeName(line.text))))))
+
+    if (startsNew) {
+      current = { head: line.text, body: [] }
+      chunks.push(current)
+      sawSpec = isSpec || SPEC_ANCHOR.test(line.text)
+      continue
+    }
+
+    current!.body.push(line.text)
+    if (isSpec) sawSpec = true
+  }
+
+  return chunks
+}
+
+function parseHeaderLines(lines: Line[]): Header {
   let name = ''
   let tag = ''
   let letter = ''
   let lowBack = false
   let swapNote: string | undefined
 
-  for (const line of lines) {
-    const nameField = fieldValue(line, ['name', 'workout'])
-    const tagField = fieldValue(line, ['tag', 'focus'])
-    const letterField = fieldValue(line, ['letter', 'badge'])
-    const noteField = fieldValue(line, ['note', 'swapnote'])
+  for (const { text } of lines) {
+    const nameField = fieldValue(text, ['name', 'workout', 'title'])
+    const tagField = fieldValue(text, ['tag', 'focus', 'subtitle'])
+    const letterField = fieldValue(text, ['letter', 'badge'])
+    const noteField = fieldValue(text, ['note', 'swapnote'])
 
-    if (nameField !== null) {
-      name = nameField
-      continue
-    }
-    if (tagField !== null) {
-      tag = tagField
-      continue
-    }
-    if (letterField !== null) {
-      letter = letterField
-      continue
-    }
-    if (noteField !== null) {
-      swapNote = noteField
-      continue
-    }
-    if (/^low[-\s]?back\b/i.test(line) && !line.includes(':')) {
-      lowBack = true
-      continue
-    }
-    if (!name) {
-      // "Workout E — Push + Core" / "Workout E | Push + Core" / "Workout E - Push + Core"
-      const [head, ...rest] = line.split(/\s*[—–|]\s*|\s+-\s+/)
+    if (nameField !== null) name = nameField
+    else if (tagField !== null) tag = tagField
+    else if (letterField !== null) letter = letterField
+    else if (noteField !== null) swapNote = noteField
+    else if (/^low[-\s]?back\b/i.test(text) && !text.includes(':')) lowBack = true
+    else if (!name) {
+      const [head, ...rest] = text.split(/\s*[—–|:]\s*|\s+-\s+/)
       name = head.trim()
       if (rest.length) tag = rest.join(' - ').trim()
     }
   }
 
   if (/low[-\s]?back/i.test(tag)) lowBack = true
-  if (!letter) {
-    letter = (/workout\s+([a-z0-9])\b/i.exec(name)?.[1] ?? name.replace(/[^a-z0-9]/gi, '')[0] ?? '?')
-  }
-
-  return { name, tag, letter: letter.slice(0, 1).toUpperCase(), lowBack, swapNote }
+  return { name, tag, letter: deriveLetter(name, letter), lowBack, swapNote }
 }
 
-function parseExercise(lines: string[], warnings: string[]): Exercise | null {
-  // A single pipe-delimited line is expanded into the multi-line shape.
-  const parts = lines.length === 1 && lines[0].includes('|') ? lines[0].split('|').map((p) => p.trim()) : lines
+/**
+ * Folds a stray fragment into a spec we already have — a table that puts rest
+ * or weight in its own column, say. Returns false when the fragment is prose,
+ * so it lands in the cue instead.
+ */
+function absorbExtraSpec(spec: Spec, line: string): boolean {
+  const text = line.toLowerCase().trim()
 
-  const name = parts[0]?.replace(/^[-*•]\s*/, '').trim()
+  // A lone duration next to a sets/reps spec is the rest period.
+  const lone = /^(\d+)\s*(s|sec|secs|seconds|min|mins|minutes?)?$/.exec(text)
+  if (lone && spec.rest === undefined && spec.type === 'strength') {
+    const value = Number(lone[1])
+    spec.rest = lone[2]?.startsWith('min') ? value * 60 : value
+    return true
+  }
+
+  const parsed = parseSpec(text)
+  if (!parsed) return false
+
+  let absorbed = false
+  if (spec.rest === undefined && parsed.rest !== undefined) {
+    spec.rest = parsed.rest
+    absorbed = true
+  }
+  if (spec.weight === undefined && parsed.weight !== undefined) {
+    spec.weight = parsed.weight
+    absorbed = true
+  }
+  return absorbed
+}
+
+function chunkToExercise(chunk: Chunk, warnings: string[]): Exercise | null {
+  const { name, rest } = splitHeadLine(chunk.head)
   if (!name) return null
 
   let spec: Spec | null = null
@@ -205,16 +429,16 @@ function parseExercise(lines: string[], warnings: string[]): Exercise | null {
   let cueUk: string | undefined
   let media: ExerciseMedia | undefined
 
-  for (const line of parts.slice(1)) {
-    const youtube = fieldValue(line, ['youtube', 'yt', 'video'])
-    const gif = fieldValue(line, ['gif', 'image'])
+  for (const line of [...rest, ...chunk.body]) {
+    const youtube = fieldValue(line, ['youtube', 'yt', 'video', 'link'])
+    const gif = fieldValue(line, ['gif', 'image', 'img'])
     const uk = fieldValue(line, ['ua', 'uk', 'укр', 'ua-cue'])
-    const cueField = fieldValue(line, ['cue', 'note'])
+    const cueField = fieldValue(line, ['cue', 'note', 'notes', 'tip', 'form'])
 
     if (youtube !== null) {
       const parsed = parseMedia(youtube, 'youtube')
       if (parsed) media = parsed
-      else warnings.push(`${name}: couldn't read the YouTube link "${youtube}".`)
+      else warnings.push(`${name}: couldn't read the video link "${youtube}".`)
       continue
     }
     if (gif !== null) {
@@ -235,82 +459,258 @@ function parseExercise(lines: string[], warnings: string[]): Exercise | null {
         spec = parsed
         continue
       }
+    } else if (absorbExtraSpec(spec, line)) {
+      // A leftover column, e.g. a table's separate Rest or Weight cell.
+      continue
     }
     cueLines.push(line)
   }
-
-  const cue = cueLines.join(' ').trim()
 
   if (!spec) {
     warnings.push(`${name}: no sets or duration found — logged as a single "mark as done".`)
     spec = { type: 'cardio' }
   }
 
-  const base = { id: slugify(name), name, cue, cueUk, media, rest: spec.rest }
+  return buildExercise({ name, cue: cueLines.join(' ').trim(), cueUk, media }, spec)
+}
 
-  if (spec.type === 'strength') {
-    return {
-      ...base,
-      type: 'strength',
-      sets: spec.sets ?? 3,
-      repTarget: spec.repTarget ?? 10,
-      repRange: spec.repRange ?? String(spec.repTarget ?? 10),
-      defaultWeight: spec.weight,
+function parseText(raw: string): ParseResult {
+  const warnings: string[] = []
+  const lines = normalize(raw)
+  if (lines.length === 0) return { workout: null, errors: ['Nothing to import yet.'], warnings }
+
+  // The title is the leading heading, or the first line when it doesn't itself
+  // look like an exercise. Otherwise the workout goes unnamed.
+  const headerLines: Line[] = []
+  let index = 0
+  const first = lines[0]
+  const firstIsExercise = SPEC_ANCHOR.test(first.text) && !first.heading
+
+  if (!firstIsExercise) {
+    headerLines.push(first)
+    index = 1
+    // Keep pulling header lines that directly follow the title — `key: value`
+    // fields and the bare low-back marker, in any order.
+    while (index < lines.length && !lines[index].blankBefore && !lines[index].marked) {
+      const { text } = lines[index]
+      const isField = fieldValue(text, ['letter', 'badge', 'tag', 'focus', 'note', 'swapnote']) !== null
+      const isLowBack = /^low[-\s]?back\b/i.test(text) && !text.includes(':')
+      if (!isField && !isLowBack) break
+      headerLines.push(lines[index])
+      index++
+    }
+  } else {
+    warnings.push('No workout name found at the top — call it something in the first line.')
+  }
+
+  const header = parseHeaderLines(headerLines)
+  const exercises = chunkExercises(lines.slice(index))
+    .map((chunk) => chunkToExercise(chunk, warnings))
+    .filter((exercise): exercise is Exercise => exercise !== null)
+
+  return assemble(header, exercises, warnings)
+}
+
+/* ---------------- JSON ---------------- */
+
+type Bag = Record<string, unknown>
+
+function isBag(value: unknown): value is Bag {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** First present key, searched case- and underscore-insensitively. */
+function field(bag: Bag, names: string[]): unknown {
+  const normalized = new Map(Object.keys(bag).map((key) => [key.toLowerCase().replace(/[_\s-]/g, ''), key]))
+  for (const name of names) {
+    const key = normalized.get(name.toLowerCase().replace(/[_\s-]/g, ''))
+    if (key !== undefined && bag[key] !== null && bag[key] !== undefined) return bag[key]
+  }
+  return undefined
+}
+
+function num(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const match = /-?\d+(?:\.\d+)?/.exec(value)
+    if (match) return Number(match[0])
+  }
+  return undefined
+}
+
+function str(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  if (typeof value === 'number') return String(value)
+  return undefined
+}
+
+/** Reps as a number, "8-10", [8,10], or {min,max}. */
+function reps(value: unknown): { target?: number; range?: string } {
+  if (typeof value === 'number') return { target: value, range: String(value) }
+  if (Array.isArray(value)) {
+    const low = num(value[0])
+    const high = num(value[1])
+    if (low !== undefined) return { target: low, range: high ? `${low}-${high}` : String(low) }
+  }
+  if (isBag(value)) {
+    const low = num(field(value, ['min', 'low', 'from', 'target']))
+    const high = num(field(value, ['max', 'high', 'to']))
+    if (low !== undefined) return { target: low, range: high ? `${low}-${high}` : String(low) }
+  }
+  if (typeof value === 'string') {
+    const low = num(value)
+    if (low !== undefined) {
+      const perSide = /side/i.test(value)
+      const high = num(value.split(/\s*-\s*/)[1] ?? '')
+      const range = high ? `${low}-${high}` : String(low)
+      return { target: low, range: perSide ? `${range} / side` : range }
+    }
+    return { range: value.trim() }
+  }
+  return {}
+}
+
+function jsonExercise(value: unknown, warnings: string[]): Exercise | null {
+  // A bare string is treated as a line of text, so ["Squat 4x10"] works.
+  if (typeof value === 'string') {
+    return chunkToExercise({ head: value, body: [] }, warnings)
+  }
+  if (!isBag(value)) return null
+
+  const name = str(field(value, ['name', 'exercise', 'title', 'movement']))
+  if (!name) return null
+
+  const cue = str(field(value, ['cue', 'note', 'notes', 'instruction', 'instructions', 'description', 'form', 'tip'])) ?? ''
+  const cueUk = str(field(value, ['cueUk', 'ua', 'uk', 'ukrainian']))
+
+  const mediaField = field(value, ['media'])
+  let media: ExerciseMedia | undefined
+  if (isBag(mediaField)) {
+    const kind = str(field(mediaField, ['kind', 'type']))
+    const src = str(field(mediaField, ['src', 'id', 'url']))
+    if (src) media = parseMedia(src, kind === 'gif' ? 'gif' : 'youtube') ?? undefined
+  } else {
+    const youtube = str(field(value, ['youtube', 'youtubeId', 'video', 'videoId', 'videoUrl', 'url', 'link']))
+    const gif = str(field(value, ['gif', 'gifUrl', 'image', 'img']))
+    if (gif) media = parseMedia(gif, 'gif') ?? undefined
+    else if (youtube) {
+      media = parseMedia(youtube, 'youtube') ?? undefined
+      if (!media) warnings.push(`${name}: couldn't read the video link "${youtube}".`)
     }
   }
-  if (spec.type === 'hold') {
-    return { ...base, type: 'hold', duration: spec.duration ?? 30 }
+
+  const rest = num(field(value, ['rest', 'restSeconds', 'restS', 'restTime']))
+  const weight = num(field(value, ['defaultWeight', 'weight', 'load', 'lb', 'lbs', 'kg']))
+  const duration = num(field(value, ['duration', 'seconds', 'durationSeconds', 'time', 'hold', 'holdSeconds']))
+
+  const rawSets = field(value, ['sets', 'setCount'])
+  const setsFromArray = Array.isArray(rawSets) ? rawSets.length : undefined
+  const sets = setsFromArray ?? num(rawSets)
+  const repSource =
+    field(value, ['repTarget', 'reps', 'repRange', 'repetitions']) ??
+    (Array.isArray(rawSets) && isBag(rawSets[0]) ? field(rawSets[0], ['reps', 'repTarget']) : undefined)
+  const { target, range } = reps(repSource)
+
+  const declared = str(field(value, ['type', 'kind', 'category']))?.toLowerCase() ?? ''
+  let type: Exercise['type']
+  if (/strength|weight|lift|resistance/.test(declared)) type = 'strength'
+  else if (/hold|isometric|static|stretch|plank/.test(declared)) type = 'hold'
+  else if (/cardio|round|flow|mobility|conditioning/.test(declared)) type = 'cardio'
+  else if (sets !== undefined || target !== undefined) type = 'strength'
+  else if (duration !== undefined) type = 'hold'
+  else {
+    warnings.push(`${name}: no sets or duration found — logged as a single "mark as done".`)
+    type = 'cardio'
   }
-  return { ...base, type: 'cardio', duration: spec.duration }
+
+  // A "strength" entry that only carries a duration is really a timed hold.
+  if (type === 'strength' && sets === undefined && target === undefined && duration !== undefined) {
+    type = 'hold'
+  }
+
+  return buildExercise(
+    { name, cue, cueUk, media },
+    { type, sets, repTarget: target, repRange: range, duration, rest, weight },
+  )
+}
+
+function jsonWorkout(value: unknown, warnings: string[]): ParseResult {
+  if (!isBag(value)) return { workout: null, errors: ['Expected a workout object.'], warnings }
+
+  const rawExercises = field(value, ['exercises', 'items', 'moves', 'movements', 'list', 'steps'])
+  if (!Array.isArray(rawExercises)) {
+    return { workout: null, errors: ['That JSON has no "exercises" array.'], warnings }
+  }
+
+  const name = str(field(value, ['name', 'title', 'workout', 'workoutName'])) ?? ''
+  const tag = str(field(value, ['tag', 'focus', 'subtitle', 'description'])) ?? ''
+  const letter = str(field(value, ['letter', 'badge']))
+  const lowBackField = field(value, ['lowBack', 'lowBackFriendly'])
+  const header: Header = {
+    name,
+    tag,
+    letter: deriveLetter(name, letter),
+    lowBack: lowBackField === true || /low[-\s]?back/i.test(tag),
+    swapNote: str(field(value, ['swapNote', 'note'])),
+  }
+
+  const exercises = rawExercises
+    .map((entry) => jsonExercise(entry, warnings))
+    .filter((exercise): exercise is Exercise => exercise !== null)
+
+  return assemble(header, exercises, warnings)
+}
+
+function parseJson(text: string): ParseResult {
+  const warnings: string[] = []
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    return {
+      workout: null,
+      errors: ["That looks like JSON but it isn't valid — check for a missing comma or bracket."],
+      warnings,
+    }
+  }
+
+  // A whole backup file, or anything wrapping a list of workouts.
+  if (isBag(value)) {
+    const list = field(value, ['workouts'])
+    if (Array.isArray(list)) {
+      if (list.length === 1) return jsonWorkout(list[0], warnings)
+      return {
+        workout: null,
+        errors: [
+          `That file holds ${list.length} workouts — use "Import from file" on the Manage screen for a backup.`,
+        ],
+        warnings,
+      }
+    }
+    return jsonWorkout(value, warnings)
+  }
+
+  if (Array.isArray(value)) {
+    // A bare array of exercises — usable, it just has no name of its own.
+    const exercises = value
+      .map((entry) => jsonExercise(entry, warnings))
+      .filter((exercise): exercise is Exercise => exercise !== null)
+    if (exercises.length > 0) {
+      warnings.push('That JSON had no workout name — add a "name" field, or rename it after saving.')
+      return assemble({ name: '', tag: '', letter: '', lowBack: false }, exercises, warnings)
+    }
+  }
+
+  return { workout: null, errors: ["That JSON doesn't look like a workout."], warnings }
 }
 
 /* ---------------- entry point ---------------- */
 
 export function parseWorkout(text: string): ParseResult {
-  const errors: string[] = []
-  const warnings: string[] = []
-  const blocks = toBlocks(text)
-
-  if (blocks.length === 0) return { workout: null, errors: ['Nothing to import yet.'], warnings }
-  if (blocks.length === 1) {
-    return {
-      workout: null,
-      errors: ['Add a blank line after the workout name, then one block per exercise.'],
-      warnings,
-    }
-  }
-
-  const header = parseHeader(blocks[0])
-  if (!header.name) errors.push('The first block needs a workout name.')
-
-  const exercises: Exercise[] = []
-  const seen = new Map<string, number>()
-
-  for (const block of blocks.slice(1)) {
-    const exercise = parseExercise(block, warnings)
-    if (!exercise) continue
-    // Ids must be unique within a workout — they key the logging state.
-    const count = seen.get(exercise.id) ?? 0
-    seen.set(exercise.id, count + 1)
-    exercises.push(count === 0 ? exercise : { ...exercise, id: `${exercise.id}-${count + 1}` })
-  }
-
-  if (exercises.length === 0) errors.push('No exercises found.')
-  if (errors.length) return { workout: null, errors, warnings }
-
-  return {
-    workout: {
-      id: `${slugify(header.name)}-${Date.now().toString(36)}`,
-      letter: header.letter,
-      name: header.name,
-      tag: header.tag || 'Custom',
-      lowBack: header.lowBack || undefined,
-      swapNote: header.swapNote,
-      exercises,
-    },
-    errors,
-    warnings,
-  }
+  const trimmed = text.trim()
+  if (!trimmed) return { workout: null, errors: ['Nothing to import yet.'], warnings: [] }
+  const isJson = trimmed.startsWith('{') || trimmed.startsWith('[')
+  return isJson ? parseJson(trimmed) : parseText(trimmed)
 }
 
 /**
@@ -340,7 +740,7 @@ export function workoutToText(workout: Workout): string {
     return [
       ex.name,
       spec.join(' '),
-      ex.cue,
+      ex.cue ? `cue: ${ex.cue}` : null,
       ex.cueUk ? `ua: ${ex.cueUk}` : null,
       ex.media?.kind === 'youtube' ? `youtube: ${ex.media.id}` : null,
       ex.media?.kind === 'gif' ? `gif: ${ex.media.src}` : null,

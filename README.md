@@ -70,23 +70,35 @@ Low back flat against the floor.
 ua: Поперек притиснутий до підлоги.
 ```
 
-Blank lines separate blocks. The first block names the workout (`Name — focus
-tag`); every block after it is one exercise: name, then a spec line, then the
-form cue. The spec line is matched loosely:
+**Nothing is rejected for formatting.** The first line names the workout
+(`Name — focus tag`); everything after it is exercises. Blank lines, bullets,
+numbers, markdown headings, indented sub-bullets, and table rows are all used as
+exercise boundaries when present — and when none are present, a short title-like
+line following a spec starts the next exercise. Anything left over becomes the
+form cue, and the screen warns about what it couldn't read rather than failing.
 
-| Line | Becomes |
+Volume specs are matched loosely, anywhere on the line:
+
+| Written | Becomes |
 | --- | --- |
 | `4 x 8-10 @ 20lb, rest 90s` | strength: 4 sets, 8–10 reps, 20 lb, 90s rest |
+| `3 sets of 10` / `10 reps x 3 sets` | strength, either word order |
 | `3 x 10 / side` | strength with per-side reps |
 | `4x12 bodyweight` | strength with no load |
-| `60s hold` | a timed hold with a countdown |
+| `4 sets AMRAP` / `3 sets to failure` | strength, open-ended reps |
+| `60s hold` / `60 second hold` | a timed hold with a countdown |
 | `40s cardio` / `cardio` | a single "mark as done" |
 
-Anything unrecognised becomes part of the cue rather than failing, and the
-screen warns about what it couldn't read. Optional extra lines: `ua: …` for a
-Ukrainian note, `youtube: <id or link>` or `gif: /demos/x.gif` for the demo
-visual, `letter: E` to override the badge, and a bare `low-back` line to file it
-under the low-back section.
+Optional extra lines: `ua: …` for a Ukrainian note, `youtube: <id or link>` or
+`gif: /demos/x.gif` for the demo visual, `letter: E` to override the badge, and
+a bare `low-back` line to file it under the low-back section.
+
+**JSON is accepted too** — an object with `name` and `exercises`, or a bare
+array of exercises. Field names are matched loosely (`exercise`/`title`/`name`,
+`reps`/`repRange`/`repetitions`, `weight`/`load`/`lb`, `notes`/`instructions`/
+`cue`), reps may be `8`, `"8-10"`, `[8,10]`, or `{min,max}`, and the exercise
+type is inferred when absent. A whole backup file is redirected to
+**Import from file**, which is the path that handles multiple workouts.
 
 The parser and its inverse live in
 [`src/lib/parseWorkout.ts`](src/lib/parseWorkout.ts).
