@@ -5,6 +5,8 @@ import type { Exercise, ExerciseLog } from '../types'
 interface Props {
   exercise: Exercise
   log: ExerciseLog
+  /** Which round this card is for. Non-circuit exercises are always round 0. */
+  round: number
   onSetField: (index: number, field: 'weight' | 'reps', value: string) => void
   onToggleSetDone: (index: number) => void
   onTick: (remaining: number) => void
@@ -14,7 +16,10 @@ interface Props {
 }
 
 function volumeLine(exercise: Exercise): string {
-  if (exercise.type === 'strength') return `${exercise.sets} × ${exercise.repRange} reps`
+  if (exercise.type === 'strength') {
+    const sets = exercise.circuit ? exercise.circuit.rounds : exercise.sets
+    return `${sets} × ${exercise.repRange} reps`
+  }
   if (exercise.type === 'hold') return `${exercise.duration}s hold`
   return exercise.duration ? `${exercise.duration}s` : '1 round'
 }
@@ -22,6 +27,7 @@ function volumeLine(exercise: Exercise): string {
 export function ExerciseCard({
   exercise,
   log,
+  round,
   onSetField,
   onToggleSetDone,
   onTick,
@@ -29,15 +35,24 @@ export function ExerciseCard({
   onReset,
   onMarkDone,
 }: Props) {
+  const circuit = exercise.circuit
+
   return (
     <>
+      {circuit && (
+        <div className="round-banner">
+          Circuit · Round {round + 1} of {circuit.rounds}
+        </div>
+      )}
+
       <div className="ex-head">
         <ExerciseDemo title={exercise.demoTitle ?? exercise.name} media={exercise.media} />
         <div className="ex-head-text">
           <h2 className="ex-name">{exercise.name}</h2>
           <div className="ex-meta">
             <span>{volumeLine(exercise)}</span>
-            <span>Rest {exercise.rest ?? 30}s</span>
+            {/* Rest is between rounds, not between stations, so a circuit hides it. */}
+            {!circuit && <span>Rest {exercise.rest ?? 30}s</span>}
           </div>
         </div>
       </div>
@@ -53,20 +68,22 @@ export function ExerciseCard({
         <StrengthLogger
           sets={log.sets}
           weightHint={exercise.type === 'strength' ? exercise.defaultWeight : undefined}
+          onlyIndex={circuit ? round : undefined}
           onSetField={onSetField}
           onToggleDone={onToggleSetDone}
         />
       )}
-      {log.type === 'hold' && (
+      {log.type === 'hold' && log.rounds[round] && (
         <HoldLogger
-          log={log}
+          round={log.rounds[round]}
+          duration={log.duration}
           onTick={onTick}
           onToggleRun={onToggleRun}
           onReset={onReset}
           onMarkDone={onMarkDone}
         />
       )}
-      {log.type === 'cardio' && <CardioLogger done={log.done} onMarkDone={onMarkDone} />}
+      {log.type === 'cardio' && <CardioLogger done={log.rounds[round]} onMarkDone={onMarkDone} />}
     </>
   )
 }

@@ -112,6 +112,24 @@ loosely (`exercise`/`title`/`name`, `reps`/`repRange`/`repetitions`,
 `weight`/`load`/`lb`, `notes`/`instructions`/`cue`), reps may be `8`, `"8-10"`,
 `[8,10]`, or `{min,max}`, and the exercise type is inferred when absent.
 
+**Circuits** — when a workout is one set of each exercise, then the whole group
+again, mark the group with a rounds header:
+
+```
+Circuit x 3
+- Goblet Squat — 10 @ 20lb
+- Push-Ups — 12 bodyweight
+- Bent Row — 10 @ 25lb
+```
+
+`Circuit x 3`, `Superset x 3`, and `3 rounds` all work, and members can be
+bulleted or plain (one per line; indent a cue under one). The header carries the
+round count, so a member line only needs its reps. The group ends at the next
+blank-line-separated unbulleted block. The workout screen then walks the deck in
+performance order — Squat R1 → Push-Ups R1 → Row R1 → Squat R2 … — with a
+"Round 2 of 3" banner, one logging row per card, and no rest shown between
+stations.
+
 **Several workouts in one paste** works either way: a JSON array of them, or
 plain text where each starts with a `Workout …` / `Day …` line. One malformed
 entry is reported as a warning and the rest still import.
@@ -131,6 +149,18 @@ movement, rather than showing a play button that can't play anything.
 
 The play triangle is an inline SVG on purpose: the `▶` character falls back to
 a different font on iOS and renders distorted.
+
+## Checks
+
+```bash
+npm run check:parser
+```
+
+Runs [`scripts/parser-check.ts`](scripts/parser-check.ts) — a table of the
+shapes people actually paste (markdown lists, tables, bare URLs, nested JSON,
+circuits, multi-workout pastes) plus a round-trip of every bundled workout
+through `workoutToText`. The parser is deliberately permissive, so this table is
+the only thing keeping it honest.
 
 ## Backup
 

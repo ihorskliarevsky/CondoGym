@@ -480,6 +480,19 @@ input[type='number'] {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
+.round-banner {
+  align-self: flex-start;
+  margin: 2px 0 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(200, 255, 77, 0.12);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
 .ex-head {
   display: flex;
   flex-wrap: wrap;
@@ -665,8 +678,9 @@ input[type='number'] {
 .dots {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 7px;
-  padding: 10px 0 18px;
+  padding: 10px 16px 18px;
   flex-shrink: 0;
 }
 

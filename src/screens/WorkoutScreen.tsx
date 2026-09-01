@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ExerciseCard } from '../components/ExerciseCard'
 import { hasProgress, initLogs, reconcileLogs, toSession } from '../lib/logs'
 import { clearDraft, loadDraft, saveDraft, saveSession } from '../lib/storage'
-import type { Workout, WorkoutLogs } from '../types'
+import type { Exercise, HoldRound, Workout, WorkoutLogs } from '../types'
 
 interface Props {
   workout: Workout
@@ -14,18 +14,52 @@ const SWIPE_THRESHOLD = 0.2
 /** Past this, a gesture is a vertical scroll and not a card swipe. */
 const SWIPE_SLOP = 10
 
+/** One card in the deck: an exercise, and which round of it this card logs. */
+interface Step {
+  exercise: Exercise
+  round: number
+}
+
+/**
+ * The order the workout is actually performed in. A plain exercise is one card.
+ * A circuit is walked round-robin — one set of each exercise, then the group
+ * again — so it contributes `rounds × members` cards.
+ */
+function buildSteps(workout: Workout): Step[] {
+  const steps: Step[] = []
+  let i = 0
+  while (i < workout.exercises.length) {
+    const circuit = workout.exercises[i].circuit
+    if (!circuit) {
+      steps.push({ exercise: workout.exercises[i], round: 0 })
+      i++
+      continue
+    }
+    const group: Exercise[] = []
+    while (i < workout.exercises.length && workout.exercises[i].circuit?.id === circuit.id) {
+      group.push(workout.exercises[i])
+      i++
+    }
+    for (let round = 0; round < circuit.rounds; round++) {
+      for (const exercise of group) steps.push({ exercise, round })
+    }
+  }
+  return steps
+}
+
 export function WorkoutScreen({ workout, onExit }: Props) {
   const [logs, setLogs] = useState<WorkoutLogs>(() => {
     const draft = loadDraft(workout.id)
     return draft ? reconcileLogs(workout, draft.logs) : initLogs(workout)
   })
+  const steps = useMemo(() => buildSteps(workout), [workout])
   const [index, setIndex] = useState(() => {
     const draft = loadDraft(workout.id)
-    return draft && draft.index < workout.exercises.length ? draft.index : 0
+    return draft && draft.index < steps.length ? draft.index : 0
   })
   const [confirmExit, setConfirmExit] = useState(false)
 
-  const total = workout.exercises.length
+  const total = steps.length
   const deckRef = useRef<HTMLDivElement>(null)
 
   /* ---- swipe ---- */
@@ -124,8 +158,22 @@ export function WorkoutScreen({ workout, onExit }: Props) {
     })
   }
 
-  function patchLog(exId: string, patch: Record<string, unknown>) {
-    setLogs((prev) => ({ ...prev, [exId]: { ...prev[exId], ...patch } as WorkoutLogs[string] }))
+  function patchHold(exId: string, round: number, patch: Partial<HoldRound>) {
+    setLogs((prev) => {
+      const log = prev[exId]
+      if (log.type !== 'hold') return prev
+      const rounds = log.rounds.map((r, idx) => (idx === round ? { ...r, ...patch } : r))
+      return { ...prev, [exId]: { ...log, rounds } }
+    })
+  }
+
+  function setCardioDone(exId: string, round: number, done: boolean) {
+    setLogs((prev) => {
+      const log = prev[exId]
+      if (log.type !== 'cardio') return prev
+      const rounds = log.rounds.map((r, idx) => (idx === round ? done : r))
+      return { ...prev, [exId]: { ...log, rounds } }
+    })
   }
 
   /* ---- finishing ---- */
@@ -176,11 +224,11 @@ export function WorkoutScreen({ workout, onExit }: Props) {
       >
         {slides.map((pos) => {
           if (pos < 0 || pos >= total) return null
-          const ex = workout.exercises[pos]
+          const { exercise: ex, round } = steps[pos]
           const offset = (pos - index) * 100
           return (
             <div
-              key={ex.id}
+              key={`${ex.id}-${round}`}
               className="slide"
               style={{ transform: `translateX(calc(${offset}% + ${dragX}px))`, transition }}
               aria-hidden={pos !== index}
@@ -188,18 +236,23 @@ export function WorkoutScreen({ workout, onExit }: Props) {
               <ExerciseCard
                 exercise={ex}
                 log={logs[ex.id]}
+                round={round}
                 onSetField={(i, field, val) => setSetField(ex.id, i, field, val)}
                 onToggleSetDone={(i) => toggleSetDone(ex.id, i)}
-                onTick={(remaining) => patchLog(ex.id, { remaining })}
-                onToggleRun={(running) => patchLog(ex.id, { running })}
+                onTick={(remaining) => patchHold(ex.id, round, { remaining })}
+                onToggleRun={(running) => patchHold(ex.id, round, { running })}
                 onReset={() =>
-                  patchLog(ex.id, {
+                  patchHold(ex.id, round, {
                     remaining: ex.type === 'hold' ? ex.duration : 0,
                     running: false,
                     done: false,
                   })
                 }
-                onMarkDone={(done) => patchLog(ex.id, { done, running: false })}
+                onMarkDone={(done) =>
+                  ex.type === 'cardio'
+                    ? setCardioDone(ex.id, round, done)
+                    : patchHold(ex.id, round, { done, running: false })
+                }
               />
               {pos === total - 1 && (
                 <button type="button" className="finish-btn" onClick={finish}>
@@ -212,8 +265,11 @@ export function WorkoutScreen({ workout, onExit }: Props) {
       </div>
 
       <div className="dots">
-        {workout.exercises.map((ex, i) => (
-          <span key={ex.id} className={`dot${i === index ? ' active' : ''}`} />
+        {steps.map((step, i) => (
+          <span
+            key={`${step.exercise.id}-${step.round}`}
+            className={`dot${i === index ? ' active' : ''}`}
+          />
         ))}
       </div>
 

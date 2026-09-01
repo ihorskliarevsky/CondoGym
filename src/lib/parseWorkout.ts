@@ -66,6 +66,13 @@ const YOUTUBE_URL =
 
 const GIF_URL = /https?:\/\/\S+\.gif\b|\/\S+\.gif\b/i
 
+/**
+ * A line that opens a circuit: "Circuit x 3", "Superset x 4", "3 rounds",
+ * "Circuit: 3 rounds". The exercises listed under it are performed round-robin.
+ */
+const CIRCUIT_HEADER =
+  /^(?:(circuit|superset|giant\s*set|tri-?set|round\s*robin)\b[^\d]*?(\d+)|(\d+)\s*rounds?\b)/i
+
 /** A line left holding nothing but its key, e.g. "youtube:" after the URL was taken. */
 const EMPTY_FIELD = /^[a-zЀ-ӿ_-]+\s*:\s*$/i
 
@@ -82,13 +89,15 @@ function parseMedia(value: string, kind: 'youtube' | 'gif'): ExerciseMedia | nul
 function buildExercise(
   base: { name: string; cue: string; cueUk?: string; media?: ExerciseMedia },
   spec: Spec,
+  circuit?: { id: string; rounds: number },
 ): Exercise {
-  const common = { ...base, id: slugify(base.name), rest: spec.rest }
+  const common = { ...base, id: slugify(base.name), rest: spec.rest, circuit }
   if (spec.type === 'strength') {
     return {
       ...common,
       type: 'strength',
-      sets: spec.sets ?? 3,
+      // In a circuit the round count is the set count.
+      sets: circuit ? circuit.rounds : spec.sets ?? 3,
       repTarget: spec.repTarget ?? 10,
       repRange: spec.repRange ?? String(spec.repTarget ?? 10),
       defaultWeight: spec.weight,
@@ -226,6 +235,8 @@ interface Line {
   marked: boolean
   heading: boolean
   blankBefore: boolean
+  /** Written indented, i.e. hanging off the line above it. */
+  indented: boolean
 }
 
 /** Cells of a markdown table's column-header row. */
@@ -299,6 +310,7 @@ function normalize(raw: string): Line[] {
       marked: tableRow || ((heading || bullet) && !indented),
       heading: heading && !indented,
       blankBefore: blankBefore && !indented,
+      indented,
     })
     blankBefore = false
   }
@@ -327,8 +339,13 @@ function looksLikeName(text: string): boolean {
   )
 }
 
+/** A circuit line naming a movement, as opposed to a cue sentence under one. */
+function looksLikeMember(text: string): boolean {
+  return /\d/.test(text) || looksLikeName(text)
+}
+
 /** Splits "Goblet Squat — 4x10 @ 20lb — chest up" into its pieces. */
-function splitHeadLine(text: string): { name: string; rest: string[] } {
+function splitHeadLine(text: string, inCircuit = false): { name: string; rest: string[] } {
   const parts = text
     .split(/\s*[—–|·]\s*|\s+-\s+|\s*:\s+(?=\d)/)
     .map((part) => part.trim())
@@ -344,6 +361,13 @@ function splitHeadLine(text: string): { name: string; rest: string[] } {
       rest: [text.slice(anchor.index).replace(/\)$/, '')],
     }
   }
+  // "Goblet Squat 10 @ 20lb" — in a circuit the trailing number is the reps.
+  if (inCircuit) {
+    const bare = /^(.+?)\s+(\d.*)$/.exec(text)
+    if (bare) {
+      return { name: bare[1].replace(/[,:(\-–—\s]+$/, '').trim(), rest: [bare[2]] }
+    }
+  }
   return { name: text, rest: [] }
 }
 
@@ -357,7 +381,7 @@ interface Chunk {
  * used when present; when they aren't, a short title-like line following a
  * spec is taken as the start of the next exercise.
  */
-function chunkExercises(lines: Line[]): Chunk[] {
+function chunkExercises(lines: Line[], inCircuit = false): Chunk[] {
   const chunks: Chunk[] = []
   let current: Chunk | null = null
   let sawSpec = false
@@ -374,12 +398,15 @@ function chunkExercises(lines: Line[]): Chunk[] {
     const split = splitHeadLine(line.text)
     const nameThenSpec = split.rest.length > 0 && looksLikeName(split.name)
 
-    const startsNew =
-      !current ||
-      (!isField &&
-        (line.marked ||
-          line.blankBefore ||
-          (sawSpec && (nameThenSpec || (!isSpec && looksLikeName(line.text))))))
+    // Circuit members are listed one per line, so anything that isn't a cue
+    // hanging off the line above starts the next member.
+    const startsNew = inCircuit
+      ? !current || (!isField && !line.indented && looksLikeMember(line.text))
+      : !current ||
+        (!isField &&
+          (line.marked ||
+            line.blankBefore ||
+            (sawSpec && (nameThenSpec || (!isSpec && looksLikeName(line.text))))))
 
     if (startsNew) {
       current = { head: line.text, body: [] }
@@ -393,6 +420,40 @@ function chunkExercises(lines: Line[]): Chunk[] {
   }
 
   return chunks
+}
+
+interface Section {
+  /** Number of rounds when this section is a circuit. */
+  rounds?: number
+  lines: Line[]
+}
+
+/**
+ * Splits the body into plain stretches and circuit groups. A circuit runs from
+ * its header until the next blank-line-separated line that isn't bulleted —
+ * which lets members be bulleted or plain, with or without blank lines between.
+ */
+function splitSections(lines: Line[]): Section[] {
+  const sections: Section[] = []
+  let current: Section = { lines: [] }
+
+  for (const line of lines) {
+    const header = CIRCUIT_HEADER.exec(line.text)
+    if (header) {
+      if (current.lines.length) sections.push(current)
+      current = { rounds: Math.max(1, Number(header[2] ?? header[3])), lines: [] }
+      continue
+    }
+    // A fresh, unbulleted block ends the circuit and starts plain territory.
+    if (current.rounds !== undefined && line.blankBefore && !line.marked) {
+      sections.push(current)
+      current = { lines: [] }
+    }
+    current.lines.push(line)
+  }
+
+  if (current.lines.length) sections.push(current)
+  return sections
 }
 
 function parseHeaderLines(lines: Line[]): Header {
@@ -455,8 +516,38 @@ function absorbExtraSpec(spec: Spec, line: string): boolean {
   return absorbed
 }
 
-function chunkToExercise(chunk: Chunk, warnings: string[]): Exercise | null {
-  const { name, rest } = splitHeadLine(chunk.head)
+/**
+ * Inside a circuit the set count lives on the header, so a member line often
+ * carries only reps: "Goblet Squat — 10 @ 20lb". Read a leading number as reps.
+ */
+function parseCircuitSpec(line: string): Spec | null {
+  const direct = parseSpec(line)
+  if (direct && !(direct.type === 'cardio' && direct.duration === undefined)) return direct
+
+  const reps = /^\s*(\d+)\s*(?:-\s*(\d+))?/.exec(line.trim())
+  if (!reps) return direct
+  const low = Number(reps[1])
+  const high = reps[2] ? Number(reps[2]) : undefined
+  const text = line.toLowerCase()
+  const perSide = /\/\s*side|per\s*side|each\s*side/.test(text)
+  const weightMatch =
+    /@\s*(\d+(?:\.\d+)?)/.exec(text) ?? /(\d+(?:\.\d+)?)\s*(?:lb|lbs|kg|pounds?)\b/.exec(text)
+  const bodyweight = /\bbody\s*weight\b|\bbw\b/.test(text)
+  const range = high ? `${low}-${high}` : String(low)
+  return {
+    type: 'strength',
+    repTarget: low,
+    repRange: perSide ? `${range} / side` : range,
+    weight: weightMatch ? Number(weightMatch[1]) : bodyweight ? 0 : undefined,
+  }
+}
+
+function chunkToExercise(
+  chunk: Chunk,
+  warnings: string[],
+  circuit?: { id: string; rounds: number },
+): Exercise | null {
+  const { name, rest } = splitHeadLine(chunk.head, circuit !== undefined)
   if (!name) return null
 
   let spec: Spec | null = null
@@ -505,7 +596,7 @@ function chunkToExercise(chunk: Chunk, warnings: string[]): Exercise | null {
       continue
     }
     if (!spec) {
-      const parsed = parseSpec(line)
+      const parsed = circuit ? parseCircuitSpec(line) : parseSpec(line)
       if (parsed) {
         spec = parsed
         continue
@@ -529,7 +620,7 @@ function chunkToExercise(chunk: Chunk, warnings: string[]): Exercise | null {
     }
   }
 
-  return buildExercise({ name, cue: cueLines.join(' ').trim(), cueUk, media }, spec)
+  return buildExercise({ name, cue: cueLines.join(' ').trim(), cueUk, media }, spec, circuit)
 }
 
 /**
@@ -587,9 +678,19 @@ function parseTextSingle(lines: Line[]): ParseResult {
   }
 
   const header = parseHeaderLines(headerLines)
-  const exercises = chunkExercises(lines.slice(index))
-    .map((chunk) => chunkToExercise(chunk, warnings))
-    .filter((exercise): exercise is Exercise => exercise !== null)
+  const exercises: Exercise[] = []
+  let circuitNo = 0
+
+  for (const section of splitSections(lines.slice(index))) {
+    const circuit =
+      section.rounds === undefined
+        ? undefined
+        : { id: `circuit-${++circuitNo}`, rounds: section.rounds }
+    for (const chunk of chunkExercises(section.lines, circuit !== undefined)) {
+      const exercise = chunkToExercise(chunk, warnings, circuit)
+      if (exercise) exercises.push(exercise)
+    }
+  }
 
   return assemble(header, exercises, warnings)
 }
@@ -853,31 +954,52 @@ export function workoutToText(workout: Workout): string {
     workout.swapNote ? `note: ${workout.swapNote}` : null,
   ].filter(Boolean)
 
-  const blocks = workout.exercises.map((ex) => {
-    const spec: string[] = []
-    if (ex.type === 'strength') {
-      spec.push(`${ex.sets} x ${ex.repRange}`)
-      if (ex.defaultWeight !== undefined) spec.push(`@ ${ex.defaultWeight}lb`)
-    } else if (ex.type === 'hold') {
-      spec.push(`${ex.duration}s hold`)
-    } else {
-      spec.push(ex.duration ? `${ex.duration}s cardio` : 'cardio')
+  const blocks: string[] = []
+  let i = 0
+  while (i < workout.exercises.length) {
+    const circuit = workout.exercises[i].circuit
+    if (!circuit) {
+      blocks.push(exerciseToText(workout.exercises[i], false))
+      i++
+      continue
     }
-    if (ex.rest !== undefined) spec.push(`rest ${ex.rest}s`)
-
-    return [
-      ex.name,
-      spec.join(' '),
-      ex.cue ? `cue: ${ex.cue}` : null,
-      ex.cueUk ? `ua: ${ex.cueUk}` : null,
-      ex.media?.kind === 'youtube' ? `youtube: ${ex.media.id}` : null,
-      ex.media?.kind === 'gif' ? `gif: ${ex.media.src}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n')
-  })
+    // A circuit becomes its header plus one bulleted line per member.
+    const members: string[] = []
+    while (i < workout.exercises.length && workout.exercises[i].circuit?.id === circuit.id) {
+      members.push(exerciseToText(workout.exercises[i], true))
+      i++
+    }
+    blocks.push([`Circuit x ${circuit.rounds}`, ...members].join('\n'))
+  }
 
   return [header.join('\n'), ...blocks].join('\n\n')
+}
+
+function exerciseToText(ex: Exercise, inCircuit: boolean): string {
+  const spec: string[] = []
+  if (ex.type === 'strength') {
+    // The header already carries the rounds, so a member lists reps only.
+    spec.push(inCircuit ? ex.repRange : `${ex.sets} x ${ex.repRange}`)
+    if (ex.defaultWeight !== undefined) spec.push(`@ ${ex.defaultWeight}lb`)
+  } else if (ex.type === 'hold') {
+    spec.push(`${ex.duration}s hold`)
+  } else {
+    spec.push(ex.duration ? `${ex.duration}s cardio` : 'cardio')
+  }
+  if (ex.rest !== undefined && !inCircuit) spec.push(`rest ${ex.rest}s`)
+
+  const extras = [
+    ex.cue ? `cue: ${ex.cue}` : null,
+    ex.cueUk ? `ua: ${ex.cueUk}` : null,
+    ex.media?.kind === 'youtube' ? `youtube: ${ex.media.id}` : null,
+    ex.media?.kind === 'gif' ? `gif: ${ex.media.src}` : null,
+  ].filter(Boolean) as string[]
+
+  if (inCircuit) {
+    // One line per member keeps the group readable; extras indent beneath it.
+    return [`- ${ex.name} — ${spec.join(' ')}`, ...extras.map((e) => `  ${e}`)].join('\n')
+  }
+  return [ex.name, spec.join(' '), ...extras].join('\n')
 }
 
 /** Shown in the import screen as a starting point. */

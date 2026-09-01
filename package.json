@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:parser": "node --experimental-strip-types --no-warnings scripts/parser-check.ts"
   },
   "dependencies": {
     "react": "^19.2.8",

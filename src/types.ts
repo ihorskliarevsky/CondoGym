@@ -21,6 +21,12 @@ interface ExerciseBase {
   cueUk?: string
   /** Rest between sets, in seconds. */
   rest?: number
+  /**
+   * Set when the exercise belongs to a circuit: one set of each exercise in the
+   * group, then the whole group again. Exercises in a circuit are contiguous
+   * and share an id; `rounds` replaces the exercise's own set count.
+   */
+  circuit?: { id: string; rounds: number }
 }
 
 export interface StrengthExercise extends ExerciseBase {
@@ -69,10 +75,17 @@ export interface SetLog {
   done: boolean
 }
 
+/** One pass at a timed hold. Non-circuit exercises simply have a single round. */
+export interface HoldRound {
+  remaining: number
+  running: boolean
+  done: boolean
+}
+
 export type ExerciseLog =
   | { type: 'strength'; sets: SetLog[] }
-  | { type: 'hold'; duration: number; remaining: number; running: boolean; done: boolean }
-  | { type: 'cardio'; done: boolean }
+  | { type: 'hold'; duration: number; rounds: HoldRound[] }
+  | { type: 'cardio'; rounds: boolean[] }
 
 export type WorkoutLogs = Record<string, ExerciseLog>
 
@@ -84,8 +97,10 @@ export interface SessionEntry {
   type: Exercise['type']
   /** Strength: the sets that were checked off. */
   sets?: { weight: string; reps: string }[]
-  /** Hold: seconds actually held. */
+  /** Hold: seconds actually held, summed over every round. */
   heldFor?: number
+  /** Hold and cardio: how many rounds were completed. */
+  rounds?: number
   done: boolean
 }
 

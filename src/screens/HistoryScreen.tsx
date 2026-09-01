@@ -25,8 +25,9 @@ function entryDetail(entry: SessionEntry): string {
     const body = allSame ? `${parts.length} × ${parts[0]}` : parts.join(', ')
     return sets.some((s) => s.weight && s.weight !== '0') ? `${body} lb` : body
   }
-  if (entry.type === 'hold') return `${entry.heldFor ?? 0}s held`
-  return 'done'
+  const rounds = entry.rounds && entry.rounds > 1 ? ` × ${entry.rounds}` : ''
+  if (entry.type === 'hold') return `${entry.heldFor ?? 0}s held${rounds}`
+  return `done${rounds}`
 }
 
 function summary(session: Session): string {
