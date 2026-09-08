@@ -54,6 +54,11 @@ chrome, and `apple-touch-icon` supplies the icon.
 - **Manage** (`src/screens/ManageScreen.tsx`) — add, edit, reorder, and delete
   workouts. Reached from the home screen footer.
 
+Editing `src/data/workouts.ts` only seeds a *fresh* install — a phone that
+already has a library keeps showing the old one. **Manage → Load the built-in
+plan** replaces the stored library with the bundled plan (history is kept), and
+is how a new plan actually reaches a device.
+
 ## Managing workouts from the phone
 
 Workouts live on-device. **Manage → Paste a new workout** takes plain text and

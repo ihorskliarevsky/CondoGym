@@ -1,6 +1,12 @@
 import { useRef, useState } from 'react'
 import { applyBackup, downloadBackup, readBackup, type BackupSummary } from '../lib/backup'
-import { countMissingDefaults, moveWorkout, removeWorkout, restoreDefaults } from '../lib/library'
+import {
+  DEFAULT_COUNT,
+  matchesDefaults,
+  moveWorkout,
+  removeWorkout,
+  resetToDefaults,
+} from '../lib/library'
 import { updateApp } from '../lib/update'
 import type { Workout } from '../types'
 
@@ -29,7 +35,8 @@ export function ManageScreen({ library, onLibraryChange, onAdd, onEdit, onBack }
   const [importError, setImportError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-  const missing = countMissingDefaults(library)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const isDefault = matchesDefaults(library)
 
   async function onFilePicked(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -125,9 +132,9 @@ export function ManageScreen({ library, onLibraryChange, onAdd, onEdit, onBack }
           Paste a new workout
         </button>
 
-        {missing > 0 && (
-          <button type="button" className="text-btn centered" onClick={() => onLibraryChange(restoreDefaults())}>
-            Restore {missing} built-in workout{missing === 1 ? '' : 's'}
+        {!isDefault && (
+          <button type="button" className="text-btn centered" onClick={() => setConfirmReset(true)}>
+            Load the built-in plan
           </button>
         )}
 
@@ -185,6 +192,35 @@ export function ManageScreen({ library, onLibraryChange, onAdd, onEdit, onBack }
 
         <p className="build-stamp">Build {buildStamp()}</p>
       </div>
+
+      {confirmReset && (
+        <div className="sheet-backdrop" onClick={() => setConfirmReset(false)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <p className="sheet-title">Load the built-in plan?</p>
+            <p className="sheet-body">
+              Your workout list is replaced by the {count(DEFAULT_COUNT, 'workout')} this app ships
+              with. Anything you pasted yourself is removed — export a backup first if you want to
+              keep it. Your logged history stays.
+            </p>
+            <div className="sheet-actions">
+              <button type="button" className="pill-ghost" onClick={() => setConfirmReset(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="pill-primary"
+                onClick={() => {
+                  onLibraryChange(resetToDefaults())
+                  setNote('Loaded the built-in plan.')
+                  setConfirmReset(false)
+                }}
+              >
+                Load
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingImport && (
         <div className="sheet-backdrop" onClick={() => setPendingImport(null)}>

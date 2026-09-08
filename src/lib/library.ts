@@ -59,13 +59,22 @@ export function moveWorkout(id: string, direction: -1 | 1): Workout[] {
   return saveLibrary(next)
 }
 
-/** Re-adds the bundled plan alongside whatever is already there. */
-export function restoreDefaults(): Workout[] {
-  const existing = loadLibrary()
-  const missing = DEFAULT_WORKOUTS.filter((d) => !existing.some((w) => w.name === d.name))
-  return saveLibrary([...existing, ...missing])
+/**
+ * Swaps the library for the bundled plan. Editing `data/workouts.ts` only ever
+ * seeds a fresh install, so this is how a new plan reaches a phone that already
+ * has the old one stored. History is untouched.
+ */
+export function resetToDefaults(): Workout[] {
+  return saveLibrary(DEFAULT_WORKOUTS)
 }
 
-export function countMissingDefaults(library: Workout[]): number {
-  return DEFAULT_WORKOUTS.filter((d) => !library.some((w) => w.name === d.name)).length
+/** How many workouts the bundled plan holds. */
+export const DEFAULT_COUNT = DEFAULT_WORKOUTS.length
+
+/** True when the stored library already matches the bundled plan exactly. */
+export function matchesDefaults(library: Workout[]): boolean {
+  return (
+    library.length === DEFAULT_WORKOUTS.length &&
+    DEFAULT_WORKOUTS.every((d, i) => library[i]?.name === d.name)
+  )
 }
