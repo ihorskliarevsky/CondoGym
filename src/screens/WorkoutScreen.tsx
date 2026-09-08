@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ExerciseCard } from '../components/ExerciseCard'
 import { hasProgress, initLogs, reconcileLogs, toSession } from '../lib/logs'
 import { clearDraft, loadDraft, saveDraft, saveSession } from '../lib/storage'
+import { loadWeights, rememberWeight, weightHint } from '../lib/weights'
 import type { Exercise, HoldRound, Workout, WorkoutLogs } from '../types'
 
 interface Props {
@@ -58,6 +59,8 @@ export function WorkoutScreen({ workout, onExit }: Props) {
     return draft && draft.index < steps.length ? draft.index : 0
   })
   const [confirmExit, setConfirmExit] = useState(false)
+  // What you last lifted for each movement, which outranks the plan's figure.
+  const [weights, setWeights] = useState(() => loadWeights())
 
   const total = steps.length
   const deckRef = useRef<HTMLDivElement>(null)
@@ -142,6 +145,7 @@ export function WorkoutScreen({ workout, onExit }: Props) {
   function toggleSetDone(exId: string, i: number) {
     const exercise = workout.exercises.find((ex) => ex.id === exId)
     const planned = exercise?.type === 'strength' ? exercise.defaultWeight : undefined
+    const hint = weightHint(weights, exId, planned)
 
     setLogs((prev) => {
       const log = prev[exId]
@@ -149,10 +153,14 @@ export function WorkoutScreen({ workout, onExit }: Props) {
       const sets = log.sets.map((s, idx) => {
         if (idx !== i) return s
         const done = !s.done
-        // Checking off a set with the weight left blank logs the planned figure
-        // that was showing as the placeholder.
-        const takePlan = done && !s.weight.trim() && planned !== undefined
-        return { ...s, done, weight: takePlan ? String(planned) : s.weight }
+        // Checking off a set with the weight blank logs whatever the placeholder
+        // was showing — last time's weight, or the plan's starting figure.
+        const takeHint = done && !s.weight.trim() && hint !== undefined
+        const weight = takeHint ? String(hint) : s.weight
+        // Completing a set is the signal that this weight is the real one, so
+        // it becomes the default the next time this movement comes round.
+        if (done && weight.trim()) setWeights(rememberWeight(exId, weight))
+        return { ...s, done, weight }
       })
       return { ...prev, [exId]: { ...log, sets } }
     })
@@ -237,6 +245,11 @@ export function WorkoutScreen({ workout, onExit }: Props) {
                 exercise={ex}
                 log={logs[ex.id]}
                 round={round}
+                weightHint={weightHint(
+                  weights,
+                  ex.id,
+                  ex.type === 'strength' ? ex.defaultWeight : undefined,
+                )}
                 onSetField={(i, field, val) => setSetField(ex.id, i, field, val)}
                 onToggleSetDone={(i) => toggleSetDone(ex.id, i)}
                 onTick={(remaining) => patchHold(ex.id, round, { remaining })}

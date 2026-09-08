@@ -7,6 +7,8 @@ interface Props {
   log: ExerciseLog
   /** Which round this card is for. Non-circuit exercises are always round 0. */
   round: number
+  /** Greyed into the empty weight field: last lifted, else the plan's figure. */
+  weightHint?: number
   onSetField: (index: number, field: 'weight' | 'reps', value: string) => void
   onToggleSetDone: (index: number) => void
   onTick: (remaining: number) => void
@@ -28,6 +30,7 @@ export function ExerciseCard({
   exercise,
   log,
   round,
+  weightHint,
   onSetField,
   onToggleSetDone,
   onTick,
@@ -67,7 +70,7 @@ export function ExerciseCard({
       {log.type === 'strength' && (
         <StrengthLogger
           sets={log.sets}
-          weightHint={exercise.type === 'strength' ? exercise.defaultWeight : undefined}
+          weightHint={weightHint}
           onlyIndex={circuit ? round : undefined}
           onSetField={onSetField}
           onToggleDone={onToggleSetDone}

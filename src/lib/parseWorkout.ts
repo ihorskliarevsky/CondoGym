@@ -64,7 +64,7 @@ interface Spec {
 const YOUTUBE_URL =
   /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:[^\s&]*&)*v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})[^\s]*/i
 
-const GIF_URL = /https?:\/\/\S+\.gif\b|\/\S+\.gif\b/i
+const GIF_URL = /https?:\/\/\S+\.gif\b|\/\S+\.gif\b|\b[\w.-]+(?:\/[\w.-]+)+\.gif\b/i
 
 /**
  * A line that opens a circuit: "Circuit x 3", "Superset x 4", "3 rounds",
@@ -475,9 +475,11 @@ function parseHeaderLines(lines: Line[]): Header {
     else if (noteField !== null) swapNote = noteField
     else if (/^low[-\s]?back\b/i.test(text) && !text.includes(':')) lowBack = true
     else if (!name) {
-      const [head, ...rest] = text.split(/\s*[—–|:]\s*|\s+-\s+/)
-      name = head.trim()
-      if (rest.length) tag = rest.join(' - ').trim()
+      // Split on the FIRST separator only — a tag like "Every session · 10–12
+      // min" contains dashes of its own and must survive intact.
+      const split = /^(.*?)(?:\s*[—–|]\s*|\s+-\s+|\s*:\s+)(.*)$/.exec(text)
+      name = (split ? split[1] : text).trim()
+      if (split) tag = split[2].trim()
     }
   }
 
@@ -559,11 +561,13 @@ function chunkToExercise(
     // Take any link out of the line first, labelled or not, so it becomes the
     // demo rather than ending up as cue text.
     let line = original
-    const video = YOUTUBE_URL.exec(line)
+    const labelled =
+      fieldValue(line, ['youtube', 'yt', 'video', 'link', 'gif', 'image', 'img']) !== null
+    const video = labelled ? null : YOUTUBE_URL.exec(line)
     if (video) {
       media ??= { kind: 'youtube', id: video[1] }
       line = line.replace(YOUTUBE_URL, '').trim()
-    } else {
+    } else if (!labelled) {
       const gif = GIF_URL.exec(line)
       if (gif) {
         media ??= { kind: 'gif', src: gif[0] }
@@ -658,7 +662,9 @@ function parseTextSingle(lines: Line[]): ParseResult {
   const headerLines: Line[] = []
   let index = 0
   const first = lines[0]
-  const firstIsExercise = SPEC_ANCHOR.test(first.text) && !first.heading
+  const beforeSeparator = first.text.split(/\s*[—–|]\s*|\s+-\s+/)[0]
+  const firstIsExercise =
+    SPEC_ANCHOR.test(first.text) && !first.heading && SPEC_ANCHOR.test(beforeSeparator)
 
   if (!firstIsExercise) {
     headerLines.push(first)

@@ -23,6 +23,12 @@ function posterUrl(id: string): string {
   return `https://img.youtube.com/vi/${id}/hqdefault.jpg`
 }
 
+/** Resolves a stored path against the site base, which is a subpath on Pages. */
+function assetUrl(src: string): string {
+  if (/^(https?:)?\/\//i.test(src) || src.startsWith('data:')) return src
+  return import.meta.env.BASE_URL.replace(/\/$/, '') + '/' + src.replace(/^\//, '')
+}
+
 function searchUrl(title: string): string {
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(`${title} form`)}`
 }
@@ -84,7 +90,7 @@ export function ExerciseDemo({ title, media }: Props) {
           aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
         >
-          <img className="demo-media" src={media.src} alt={`${title} demo`} />
+          <img className="demo-media" src={assetUrl(media.src)} alt={`${title} demo`} />
           {expanded && <span className="demo-label">{title}</span>}
         </button>
       </div>

@@ -37,11 +37,16 @@ chrome, and `apple-touch-icon` supplies the icon.
 - **Workout** (`src/screens/WorkoutScreen.tsx`) — a swipeable, one-exercise-at-
   a-time deck. Swipe or use ←/→. Three logger types by exercise `type`:
   - `strength` — weight + reps per set with a done checkbox. Reps pre-fill with
-    the exercise's target; weight starts empty with the planned figure showing
-    as a placeholder, so nothing is logged that wasn't lifted. Editing either
-    field carries the number forward into the later sets that haven't been
-    logged yet, and checking a set off with the weight still blank logs the
-    planned figure.
+    the exercise's target; weight starts empty with a placeholder, so nothing is
+    logged that wasn't lifted. Editing either field carries the number forward
+    into the later sets that haven't been logged yet, and checking a set off
+    with the weight still blank logs the placeholder.
+
+    The placeholder is **the weight you last completed a set at**, falling back
+    to the plan's figure only until you've lifted the movement once. Completing
+    a set writes that weight to `condogym.weights.v1`
+    ([`src/lib/weights.ts`](src/lib/weights.ts)), keyed by exercise id, so a
+    correction sticks for next time instead of needing to be re-entered.
   - `hold` — a countdown for timed holds.
   - `cardio` — a single "mark as done" button.
 - **History** (`src/screens/HistoryScreen.tsx`) — past sessions, expandable to
@@ -142,7 +147,9 @@ The parser and its inverse live in
 A YouTube demo shows its poster frame in the collapsed tile and starts playing
 on that one tap — the iframe is only created then, so swiping through a workout
 never pulls an embed per exercise. GIFs loop in the tile and expand on tap;
-local ones go in `public/demos/` and are referenced as `/demos/name.gif`.
+local ones go in `public/demos/` and are referenced **without a leading slash**
+(`demos/press/01-bench.gif`) so they resolve against the site's base — an
+absolute path would 404 on the Pages subpath.
 
 Exercises with no `media` say so plainly and offer a YouTube search for the
 movement, rather than showing a play button that can't play anything.
