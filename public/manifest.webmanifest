@@ -1,7 +1,7 @@
 {
-  "name": "Condo Gym",
-  "short_name": "Condo Gym",
-  "description": "A personal workout card for the condo gym.",
+  "name": "Gym",
+  "short_name": "Gym",
+  "description": "A personal workout card.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

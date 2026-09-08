@@ -31,7 +31,7 @@ export function buildBackup(): Backup {
 }
 
 export function backupFilename(date = new Date()): string {
-  return `condo-gym-${date.toISOString().slice(0, 10)}.json`
+  return `gym-${date.toISOString().slice(0, 10)}.json`
 }
 
 /**
@@ -75,7 +75,7 @@ export function readBackup(text: string): { summary: BackupSummary | null; error
 
   const raw = parsed as Partial<Backup>
   if (!raw || raw.format !== FORMAT) {
-    return { summary: null, error: "That doesn't look like a Condo Gym backup." }
+    return { summary: null, error: "That doesn't look like a Gym backup." }
   }
   if (typeof raw.version === 'number' && raw.version > VERSION) {
     return { summary: null, error: 'That backup was made by a newer version of the app.' }

@@ -1,4 +1,4 @@
-# Condo Gym
+# Gym
 
 A personal, single-user mobile web app for logging home/condo gym workouts — a
 digital workout card. No accounts, no cloud; everything is stored on-device in
@@ -171,7 +171,7 @@ the only thing keeping it honest.
 
 ## Backup
 
-**Manage → Export to file** downloads `condo-gym-YYYY-MM-DD.json` holding every
+**Manage → Export to file** downloads `gym-YYYY-MM-DD.json` holding every
 workout and every logged session. On iOS this opens the share sheet, so it can
 go straight to Files or iCloud.
 

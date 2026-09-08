@@ -30,7 +30,7 @@ export function HomeScreen({ library, onSelect, onHistory, onManage }: Props) {
     <div className="app-shell">
       <div className="home">
         <div className="home-header">
-          <h1 className="display home-title">CONDO GYM</h1>
+          <h1 className="display home-title">GYM</h1>
           <p className="home-sub">Pick today’s session</p>
         </div>
 
